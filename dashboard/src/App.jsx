@@ -37,36 +37,12 @@ import {
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 const navItems = [
-  {
-    id: "dashboard",
-    label: "Dashboard",
-    icon: LayoutDashboard,
-  },
-  {
-    id: "market",
-    label: "Market Monitor",
-    icon: LineChart,
-  },
-  {
-    id: "prediction",
-    label: "Predictions",
-    icon: TrendingUp,
-  },
-  {
-    id: "analytics",
-    label: "Analytics",
-    icon: BarChart3,
-  },
-  {
-    id: "pipeline",
-    label: "Pipeline",
-    icon: Cpu,
-  },
-  {
-    id: "insights",
-    label: "Model Insights",
-    icon: Brain,
-  },
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "market", label: "Market Monitor", icon: LineChart },
+  { id: "prediction", label: "Predictions", icon: TrendingUp },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "pipeline", label: "Pipeline", icon: Cpu },
+  { id: "insights", label: "Model Insights", icon: Brain },
 ];
 
 /* =========================================================
@@ -77,7 +53,7 @@ function formatCurrency(value) {
   if (
     value === null ||
     value === undefined ||
-    Number.isNaN(Number(value))
+    !Number.isFinite(Number(value))
   ) {
     return "₹--";
   }
@@ -89,7 +65,7 @@ function formatPercent(value) {
   if (
     value === null ||
     value === undefined ||
-    Number.isNaN(Number(value))
+    !Number.isFinite(Number(value))
   ) {
     return "--";
   }
@@ -97,10 +73,32 @@ function formatPercent(value) {
   return `${Number(value) >= 0 ? "+" : ""}${Number(value).toFixed(4)}%`;
 }
 
+function formatDate(dateValue) {
+  if (!dateValue) return "--";
+
+  const date = new Date(dateValue);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(dateValue).slice(0, 10);
+  }
+
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 /* =========================================================
    NORMALIZE HISTORY DATA
-   This prevents chart problems caused by different
-   FastAPI response formats.
+
+   Handles:
+   - Array response
+   - { history: [] }
+   - { data: [] }
+   - { results: [] }
+
+   Also supports different backend field names.
 ========================================================= */
 
 function normalizeHistoryResponse(responseData) {
@@ -122,15 +120,18 @@ function normalizeHistoryResponse(responseData) {
         row?.date ??
         row?.Date ??
         row?.prediction_date ??
-        row?.predictionDate;
+        row?.predictionDate ??
+        row?.timestamp;
 
       const usd =
         row?.usd_inr ??
         row?.USD_INR ??
         row?.usdInr ??
         row?.usd_inr_rate ??
+        row?.usd_rate ??
         row?.rate ??
-        row?.value;
+        row?.value ??
+        row?.close;
 
       const numericUsd = Number(usd);
 
@@ -145,7 +146,7 @@ function normalizeHistoryResponse(responseData) {
       }
 
       return {
-        date: String(date).slice(0, 10),
+        date: parsedDate.toISOString().slice(0, 10),
         usd_inr: numericUsd,
         dateLabel: parsedDate.toLocaleDateString("en-IN", {
           day: "2-digit",
@@ -161,44 +162,18 @@ function normalizeHistoryResponse(responseData) {
    INTERACTIVE 3D CARD
 ========================================================= */
 
-function TiltCard({
-  children,
-  className = "",
-  ...props
-}) {
+function TiltCard({ children, className = "", ...props }) {
   const handleMove = (event) => {
     const element = event.currentTarget;
     const rect = element.getBoundingClientRect();
 
-    const x =
-      (event.clientX - rect.left) /
-        rect.width -
-      0.5;
+    const x = (event.clientX - rect.left) / rect.width - 0.5;
+    const y = (event.clientY - rect.top) / rect.height - 0.5;
 
-    const y =
-      (event.clientY - rect.top) /
-        rect.height -
-      0.5;
-
-    element.style.setProperty(
-      "--rx",
-      `${y * -4}deg`
-    );
-
-    element.style.setProperty(
-      "--ry",
-      `${x * 4}deg`
-    );
-
-    element.style.setProperty(
-      "--mx",
-      `${(x + 0.5) * 100}%`
-    );
-
-    element.style.setProperty(
-      "--my",
-      `${(y + 0.5) * 100}%`
-    );
+    element.style.setProperty("--rx", `${y * -4}deg`);
+    element.style.setProperty("--ry", `${x * 4}deg`);
+    element.style.setProperty("--mx", `${(x + 0.5) * 100}%`);
+    element.style.setProperty("--my", `${(y + 0.5) * 100}%`);
   };
 
   const reset = (event) => {
@@ -229,11 +204,12 @@ function TiltCard({
 function App() {
   const [prediction, setPrediction] = useState(null);
   const [history, setHistory] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(true);
+
   const [error, setError] = useState(null);
-  const [activeSection, setActiveSection] =
-    useState("dashboard");
+  const [activeSection, setActiveSection] = useState("dashboard");
 
   /* =======================================================
      FETCH PREDICTION
@@ -248,13 +224,13 @@ function App() {
         }
       );
 
-      setPrediction(response.data);
-    } catch (err) {
-      console.error(
-        "Prediction API error:",
-        err
-      );
+      console.log("Prediction API response:", response.data);
 
+      setPrediction(response.data);
+
+      return response.data;
+    } catch (err) {
+      console.error("Prediction API error:", err);
       throw err;
     }
   }, []);
@@ -279,10 +255,9 @@ function App() {
         response.data
       );
 
-      const normalized =
-        normalizeHistoryResponse(
-          response.data
-        );
+      const normalized = normalizeHistoryResponse(
+        response.data
+      );
 
       console.log(
         "Normalized chart rows:",
@@ -291,13 +266,14 @@ function App() {
       );
 
       setHistory(normalized);
+
+      return normalized;
     } catch (err) {
-      console.error(
-        "History API error:",
-        err
-      );
+      console.error("History API error:", err);
 
       setHistory([]);
+
+      throw err;
     } finally {
       setHistoryLoading(false);
     }
@@ -311,22 +287,33 @@ function App() {
     setLoading(true);
     setError(null);
 
-    try {
-      await Promise.all([
-        fetchPrediction(),
-        fetchHistory(),
-      ]);
-    } catch (err) {
+    const results = await Promise.allSettled([
+      fetchPrediction(),
+      fetchHistory(),
+    ]);
+
+    const predictionFailed =
+      results[0].status === "rejected";
+
+    const historyFailed =
+      results[1].status === "rejected";
+
+    if (predictionFailed && historyFailed) {
       setError(
         "Unable to connect to the InsightIQ AI backend."
       );
-    } finally {
-      setLoading(false);
+    } else if (predictionFailed) {
+      setError(
+        "Prediction service is unavailable. Historical data may still be available."
+      );
+    } else if (historyFailed) {
+      setError(
+        "Historical data could not be loaded. Prediction service is still available."
+      );
     }
-  }, [
-    fetchPrediction,
-    fetchHistory,
-  ]);
+
+    setLoading(false);
+  }, [fetchPrediction, fetchHistory]);
 
   /* =======================================================
      INITIAL LOAD
@@ -334,6 +321,19 @@ function App() {
 
   useEffect(() => {
     refreshAll();
+  }, [refreshAll]);
+
+  /* =======================================================
+     AUTO REFRESH
+     Refreshes data every 5 minutes.
+======================================================= */
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshAll();
+    }, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
   }, [refreshAll]);
 
   /* =======================================================
@@ -353,38 +353,27 @@ function App() {
       return undefined;
     }
 
-    const observer =
-      new IntersectionObserver(
-        (entries) => {
-          const visible = entries
-            .filter(
-              (entry) =>
-                entry.isIntersecting
-            )
-            .sort(
-              (a, b) =>
-                b.intersectionRatio -
-                a.intersectionRatio
-            )[0];
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort(
+            (a, b) =>
+              b.intersectionRatio -
+              a.intersectionRatio
+          )[0];
 
-          if (
-            visible?.target?.dataset?.section
-          ) {
-            setActiveSection(
-              visible.target.dataset.section
-            );
-          }
-        },
-        {
-          rootMargin:
-            "-15% 0px -65% 0px",
-          threshold: [
-            0.05,
-            0.15,
-            0.3,
-          ],
+        if (visible?.target?.dataset?.section) {
+          setActiveSection(
+            visible.target.dataset.section
+          );
         }
-      );
+      },
+      {
+        rootMargin: "-15% 0px -65% 0px",
+        threshold: [0.05, 0.15, 0.3],
+      }
+    );
 
     sections.forEach((section) =>
       observer.observe(section)
@@ -397,49 +386,52 @@ function App() {
      NAVIGATION
   ======================================================= */
 
-  const navigateTo = useCallback(
-    (section) => {
-      setActiveSection(section);
+  const navigateTo = useCallback((section) => {
+    setActiveSection(section);
 
-      const target =
-        document.querySelector(
-          `[data-section="${section}"]`
-        );
+    const target = document.querySelector(
+      `[data-section="${section}"]`
+    );
 
-      if (target) {
-        target.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      }
-    },
-    []
-  );
+    if (target) {
+      target.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  }, []);
 
   /* =======================================================
      DERIVED VALUES
   ======================================================= */
 
-  const directionUp =
-    prediction?.direction === "UP";
+  const direction =
+    prediction?.direction?.toUpperCase();
 
-  const directionDown =
-    prediction?.direction === "DOWN";
+  const directionUp = direction === "UP";
+  const directionDown = direction === "DOWN";
 
   const current =
-    prediction?.current_usd_inr;
+    prediction?.current_usd_inr ??
+    prediction?.current_rate ??
+    prediction?.current;
 
   const forecast =
-    prediction?.predicted_usd_inr;
+    prediction?.predicted_usd_inr ??
+    prediction?.predicted_rate ??
+    prediction?.forecast;
 
   const expectedChange =
-    prediction?.expected_change;
+    prediction?.expected_change ??
+    prediction?.expected_change_inr;
+
+  const predictedReturn =
+    prediction?.predicted_return_percent ??
+    prediction?.predicted_return ??
+    prediction?.return_percent;
 
   /* =======================================================
      CHART DATA
-
-     IMPORTANT:
-     Do NOT recreate or transform this unnecessarily.
   ======================================================= */
 
   const chartData = useMemo(() => {
@@ -454,12 +446,20 @@ function App() {
     }));
   }, [history]);
 
+  /* =======================================================
+     LAST DATE
+  ======================================================= */
+
   const lastDate =
     prediction?.prediction_date ||
+    prediction?.date ||
     (history.length
       ? history[history.length - 1]?.date
-      : null) ||
-    "--";
+      : null);
+
+  /* =======================================================
+     RENDER
+  ======================================================= */
 
   return (
     <div className="app-shell">
@@ -480,14 +480,14 @@ function App() {
         className="particles"
         aria-hidden="true"
       >
-        {Array.from({
-          length: 18,
-        }).map((_, index) => (
-          <span
-            className="particle"
-            key={index}
-          />
-        ))}
+        {Array.from({ length: 18 }).map(
+          (_, index) => (
+            <span
+              className="particle"
+              key={index}
+            />
+          )
+        )}
       </div>
 
       {/* =================================================
@@ -547,6 +547,7 @@ function App() {
                   navigateTo(id)
                 }
               >
+
                 <span className="nav-icon">
                   <Icon size={17} />
                 </span>
@@ -556,6 +557,7 @@ function App() {
                 {activeSection === id && (
                   <i className="nav-active-glow" />
                 )}
+
               </button>
             )
           )}
@@ -659,14 +661,20 @@ function App() {
               onClick={refreshAll}
               disabled={loading}
             >
+
               <RefreshCw
                 size={15}
                 className={
-                  loading ? "spin" : ""
+                  loading
+                    ? "spin"
+                    : ""
                 }
               />
 
-              Refresh Data
+              {loading
+                ? "Refreshing..."
+                : "Refresh Data"}
+
             </button>
 
           </div>
@@ -675,7 +683,9 @@ function App() {
 
         <main className="dashboard-content">
 
-          {/* ERROR */}
+          {/* =================================================
+              ERROR
+          ================================================= */}
 
           {error && (
             <div className="error-box">
@@ -683,7 +693,7 @@ function App() {
               <div>
 
                 <strong>
-                  Backend connection error
+                  Backend connection issue
                 </strong>
 
                 <span>
@@ -723,6 +733,7 @@ function App() {
               <h2>
                 Intelligence
                 <br />
+
                 <span>
                   that moves markets.
                 </span>
@@ -767,7 +778,7 @@ function App() {
                 Prediction for
 
                 <strong>
-                  {lastDate}
+                  {formatDate(lastDate)}
                 </strong>
 
               </div>
@@ -881,8 +892,7 @@ function App() {
                 <strong>
                   {loading
                     ? "..."
-                    : prediction?.direction ||
-                      "WAITING"}
+                    : direction || "WAITING"}
                 </strong>
 
               </div>
@@ -959,7 +969,7 @@ function App() {
                 {loading
                   ? "--"
                   : formatPercent(
-                      prediction?.predicted_return_percent
+                      predictedReturn
                     )}
               </strong>
 
@@ -996,8 +1006,7 @@ function App() {
               <strong>
                 {loading
                   ? "--"
-                  : prediction?.direction ||
-                    "WAITING"}
+                  : direction || "WAITING"}
               </strong>
 
               <small>
@@ -1084,14 +1093,15 @@ function App() {
 
                   <strong
                     className={
-                      Number(
-                        expectedChange
-                      ) >= 0
+                      Number(expectedChange) >= 0
                         ? "green-text"
                         : "red-text"
                     }
                   >
-                    {expectedChange == null
+                    {expectedChange == null ||
+                    !Number.isFinite(
+                      Number(expectedChange)
+                    )
                       ? "--"
                       : `${
                           Number(
@@ -1107,12 +1117,6 @@ function App() {
                 </div>
 
               </div>
-
-              {/* IMPORTANT:
-                  Fixed min-height prevents
-                  ResponsiveContainer from
-                  collapsing.
-              */}
 
               <div
                 className="chart-container"
@@ -1413,8 +1417,7 @@ function App() {
                 <div>
 
                   <strong>
-                    {prediction?.direction ||
-                      "WAITING"}
+                    {direction || "WAITING"}
                   </strong>
 
                   <span>
@@ -1424,8 +1427,7 @@ function App() {
                       ? "higher"
                       : directionDown
                       ? "lower"
-                      : "sideways"}
-                    .
+                      : "sideways"}.
                   </span>
 
                 </div>
@@ -1441,7 +1443,10 @@ function App() {
                   </span>
 
                   <strong>
-                    {expectedChange == null
+                    {expectedChange == null ||
+                    !Number.isFinite(
+                      Number(expectedChange)
+                    )
                       ? "--"
                       : `${
                           Number(
@@ -1464,7 +1469,7 @@ function App() {
 
                   <strong>
                     {formatPercent(
-                      prediction?.predicted_return_percent
+                      predictedReturn
                     )}
                   </strong>
 
@@ -1521,36 +1526,51 @@ function App() {
               <div className="analytics-orb-row">
 
                 <div className="metric-orb cyan-orb">
+
                   <div>
+
                     <strong>
                       20
                     </strong>
+
                     <span>
                       FEATURES
                     </span>
+
                   </div>
+
                 </div>
 
                 <div className="metric-orb purple-orb">
+
                   <div>
+
                     <strong>
                       RF
                     </strong>
+
                     <span>
                       MODEL
                     </span>
+
                   </div>
+
                 </div>
 
                 <div className="metric-orb green-orb">
+
                   <div>
+
                     <strong>
                       LIVE
                     </strong>
+
                     <span>
                       PIPELINE
                     </span>
+
                   </div>
+
                 </div>
 
               </div>
@@ -1558,39 +1578,51 @@ function App() {
               <div className="analytics-list">
 
                 <div>
+
                   <span>
                     Prediction target
                   </span>
+
                   <strong>
                     Next-day USD/INR
                   </strong>
+
                 </div>
 
                 <div>
+
                   <span>
                     Currency source
                   </span>
+
                   <strong>
                     RBI reference rates
                   </strong>
+
                 </div>
 
                 <div>
+
                   <span>
                     Market signal
                   </span>
+
                   <strong>
                     WTI crude oil
                   </strong>
+
                 </div>
 
                 <div>
+
                   <span>
                     Inference status
                   </span>
+
                   <strong className="green-text">
                     Operational
                   </strong>
+
                 </div>
 
               </div>
@@ -2062,7 +2094,9 @@ function App() {
 
           </section>
 
-          {/* FOOTER */}
+          {/* =================================================
+              FOOTER
+          ================================================= */}
 
           <footer className="footer">
 
