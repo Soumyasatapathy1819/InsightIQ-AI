@@ -1,135 +1,114 @@
 # InsightIQ AI
 
-> **AI-Powered Business Intelligence & Customer Analytics Platform for USD/INR Forecasting**
+### AI-Powered Currency Intelligence & Analytics Platform
 
-InsightIQ AI is an end-to-end data analytics and machine learning platform designed to analyze and forecast **USD/INR exchange rates** using historical **RBI reference-rate data** and external market signals such as **WTI crude oil prices**.
+InsightIQ AI is an end-to-end data analytics and machine learning platform for analyzing and forecasting **USD/INR exchange rates** using historical **RBI reference-rate data** and external **WTI crude-oil price signals**.
 
-The platform combines automated data ingestion, PostgreSQL data storage, feature engineering, statistical analysis, machine learning, REST APIs, and an interactive React dashboard into a single analytics pipeline.
+The platform combines automated data ingestion, PostgreSQL storage, feature engineering, statistical analytics, machine learning, and an interactive React dashboard into a single analytics pipeline.
 
 ---
 
-## 🚀 Project Overview
+## 🚀 Key Features
 
-InsightIQ AI transforms raw financial data into actionable insights through an automated analytics workflow.
+* 📊 **RBI Exchange Rate Analytics**
 
-### Core workflow
+  * Historical USD/INR and other currency reference rates
+  * Daily percentage changes
+  * 7-day and 30-day moving averages
+  * Volatility analysis
+
+* 🛢️ **WTI Crude Oil Integration**
+
+  * External crude-oil price data
+  * Integration with currency analytics
+  * Analysis of potential relationships between oil prices and USD/INR
+
+* 🤖 **Machine Learning**
+
+  * USD/INR next-rate prediction
+  * Random Forest-based modeling
+  * Baseline model comparison
+  * Direction prediction experiments
+
+* 🔄 **Automated Data Pipeline**
+
+  * Data fetching
+  * Data validation
+  * Database ingestion
+  * Feature generation
+  * Prediction pipeline
+
+* 🗄️ **PostgreSQL Database**
+
+  * Structured storage for exchange-rate and oil-price data
+  * Separate database layer for connections and table creation
+
+* 📈 **Interactive Dashboard**
+
+  * React + Vite frontend
+  * Currency analytics
+  * Market indicators
+  * Prediction results
+  * Visual data exploration
+
+* ⚙️ **API Layer**
+
+  * Python backend
+  * FastAPI-based API endpoints
+  * Analytics and prediction integration
+
+---
+
+## 🏗️ System Architecture
 
 ```text
-RBI Reference Rates
-        │
-        ▼
-Data Ingestion
-        │
-        ▼
-Data Validation & Cleaning
-        │
-        ▼
-PostgreSQL Database
-        │
-        ▼
-Feature Engineering
-        │
-        ├── Moving Averages
-        ├── Daily Returns
-        ├── Volatility
-        └── Market Indicators
-        │
-        ▼
-Machine Learning
-        │
-        ├── Baseline Model
-        ├── Return Prediction
-        └── Direction Classification
-        │
-        ▼
-FastAPI Backend
-        │
-        ▼
-React Dashboard
-        │
-        ▼
-Interactive Analytics & Forecasting
+                    ┌──────────────────────┐
+                    │      RBI Data        │
+                    │  Reference Rates     │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │   Data Ingestion     │
+                    │   & Validation       │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │      PostgreSQL      │
+                    │       Database       │
+                    └──────────┬───────────┘
+                               │
+                 ┌─────────────┴─────────────┐
+                 │                           │
+                 ▼                           ▼
+      ┌────────────────────┐      ┌────────────────────┐
+      │ Feature Engineering│      │   WTI Oil Prices   │
+      │ & Analytics        │      │      Dataset       │
+      └─────────┬──────────┘      └─────────┬──────────┘
+                │                           │
+                └─────────────┬─────────────┘
+                              ▼
+                   ┌─────────────────────┐
+                   │ Machine Learning    │
+                   │ USD/INR Prediction  │
+                   └──────────┬──────────┘
+                              │
+                              ▼
+                   ┌─────────────────────┐
+                   │     FastAPI API     │
+                   └──────────┬──────────┘
+                              │
+                              ▼
+                   ┌─────────────────────┐
+                   │   React Dashboard   │
+                   │       + Vite        │
+                   └─────────────────────┘
 ```
 
 ---
 
-## ✨ Key Features
-
-* 📊 Historical USD/INR exchange-rate analysis
-* 🏦 RBI reference-rate data ingestion
-* 🛢️ WTI crude oil price integration
-* 🧹 Automated data cleaning and validation
-* 🗄️ PostgreSQL database integration
-* 📈 Moving averages and volatility analysis
-* 📉 Daily percentage-return calculation
-* 🤖 Machine learning-based USD/INR prediction
-* 🔮 Currency movement direction classification
-* ⚡ FastAPI REST backend
-* ⚛️ React + Vite analytics dashboard
-* 🔄 Daily data-update pipeline
-* 📊 Interactive financial analytics
-* 🧪 Database and pipeline testing
-
----
-
-## 🧠 Machine Learning
-
-InsightIQ AI experiments with machine learning models to predict future USD/INR movements.
-
-### Prediction approaches
-
-#### 1. Baseline Model
-
-A naive baseline is used as a benchmark for evaluating whether the machine learning models provide meaningful predictive improvement.
-
-#### 2. USD/INR Return Model
-
-The model uses engineered historical features such as:
-
-* USD/INR exchange rate
-* Daily percentage returns
-* 7-day moving average
-* 30-day moving average
-* Historical volatility
-* Lag-based features
-
-#### 3. Direction Classification
-
-A classification model attempts to predict whether the USD/INR rate will:
-
-```text
-↑ Increase
-↓ Decrease
-```
-
-This provides an additional perspective beyond numerical price prediction.
-
----
-
-## 📊 Data Sources
-
-### RBI Reference Rates
-
-Historical exchange-rate data is obtained from the **Reserve Bank of India (RBI)** reference-rate dataset.
-
-The dataset contains exchange rates for currencies including:
-
-* USD
-* GBP
-* EUR
-* JPY
-* AED
-* IDR
-
-### WTI Crude Oil
-
-The project also incorporates historical **WTI crude oil prices** as an external market indicator.
-
-This allows the system to investigate whether crude-oil movements provide useful information for currency-rate analysis.
-
----
-
-## 🏗️ Project Architecture
+## 📁 Project Structure
 
 ```text
 InsightIQ-AI/
@@ -146,24 +125,35 @@ InsightIQ-AI/
 ├── dashboard/
 │   ├── public/
 │   ├── src/
+│   │   ├── assets/
+│   │   ├── App.jsx
+│   │   ├── App.css
+│   │   ├── index.css
+│   │   └── main.jsx
 │   ├── package.json
-│   └── vite.config.js
+│   ├── vite.config.js
+│   └── README.md
 │
 ├── data/
-│   └── download_oil.py
+│   ├── download_oil.py
+│   ├── oil_prices.csv
+│   └── raw/
 │
 ├── database/
 │   ├── connection.py
 │   ├── create_tables.py
-│   └── test_connection.py
+│   ├── test_connection.py
+│   └── __init__.py
 │
 ├── ingestion/
-│   ├── oil_ingestion.py
 │   ├── rbi_fetcher.py
-│   └── rbi_ingestion.py
+│   ├── rbi_ingestion.py
+│   ├── oil_ingestion.py
+│   └── __init__.py
 │
 ├── pipeline/
-│   └── daily_update.py
+│   ├── daily_update.py
+│   └── __init__.py
 │
 ├── prediction/
 │   ├── feature_builder.py
@@ -173,12 +163,14 @@ InsightIQ-AI/
 ├── package.json
 ├── package-lock.json
 ├── check_tables.py
-└── test_setup.py
+├── test_setup.py
+├── .gitignore
+└── README.md
 ```
 
 ---
 
-## 🛠️ Technology Stack
+## 🛠️ Tech Stack
 
 ### Backend & Data
 
@@ -188,6 +180,7 @@ InsightIQ-AI/
 * Scikit-learn
 * PostgreSQL
 * FastAPI
+* SQL
 
 ### Frontend
 
@@ -198,24 +191,121 @@ InsightIQ-AI/
 
 ### Analytics & Machine Learning
 
-* Statistical analysis
-* Feature engineering
-* Time-series features
+* Exploratory Data Analysis
+* Time-series feature engineering
+* Moving averages
+* Percentage returns
+* Volatility features
 * Random Forest
+* Regression
 * Classification
-* Model evaluation
 
-### Development Tools
+### Data Sources
 
-* Git
-* GitHub
-* VS Code
-* Python Virtual Environment
-* npm
+* Reserve Bank of India reference-rate data
+* WTI crude-oil price data
 
 ---
 
-## ⚙️ Installation
+## 📊 Data Pipeline
+
+InsightIQ AI follows a structured data pipeline:
+
+### 1. Data Acquisition
+
+Historical RBI reference-rate data is collected and processed.
+
+WTI crude-oil price data is also incorporated as an external market indicator.
+
+### 2. Data Validation
+
+The pipeline checks for:
+
+* Missing values
+* Duplicate dates
+* Data consistency
+* Date ranges
+* Required columns
+
+### 3. Database Ingestion
+
+Validated data is stored in PostgreSQL for structured querying and downstream analytics.
+
+### 4. Feature Engineering
+
+The project generates features such as:
+
+```text
+USD/INR
+GBP/INR
+EUR/INR
+JPY/INR
+AED/INR
+IDR/INR
+Daily Percentage Change
+7-Day Moving Average
+30-Day Moving Average
+Volatility
+WTI Oil Price
+```
+
+### 5. Machine Learning
+
+The engineered dataset is used to experiment with:
+
+* USD/INR rate prediction
+* Return prediction
+* Direction classification
+* Baseline vs ML model performance
+
+### 6. API & Dashboard
+
+The processed analytics and predictions are exposed through the backend API and presented through the React dashboard.
+
+---
+
+## 🤖 Machine Learning
+
+The project evaluates machine-learning models against simple baseline approaches.
+
+One of the primary experiments uses **Random Forest** for USD/INR prediction.
+
+The project also explores predicting the **direction of currency movement** as a classification problem.
+
+### Evaluation Metrics
+
+Regression models are evaluated using:
+
+* Mean Absolute Error (MAE)
+* Root Mean Squared Error (RMSE)
+
+Classification experiments use:
+
+* Accuracy
+* Precision
+* Recall
+* F1-score
+* Confusion Matrix
+
+---
+
+## 📈 Analytics
+
+The analytics layer provides insights into currency movements through:
+
+* Daily returns
+* Moving averages
+* Rolling volatility
+* Currency comparisons
+* Market-indicator relationships
+* Historical trends
+* Prediction performance
+
+The objective is not simply to generate a prediction, but to provide a broader **business-intelligence view of currency movements**.
+
+---
+
+## ⚙️ Local Setup
 
 ### 1. Clone the repository
 
@@ -230,97 +320,105 @@ cd InsightIQ-AI
 python -m venv .venv
 ```
 
-### 3. Activate the virtual environment
-
-#### Windows PowerShell
+Activate it on Windows:
 
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
-### 4. Install Python dependencies
+### 3. Install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
+### 4. Configure environment variables
 
-## 🗄️ Database Setup
-
-InsightIQ AI uses PostgreSQL for persistent storage.
-
-Create a PostgreSQL database and configure the required environment variables in a `.env` file.
+Create a `.env` file in the project root.
 
 Example:
 
 ```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=insightiq
-DB_USER=postgres
-DB_PASSWORD=your_password
+DATABASE_URL=your_postgresql_connection_string
 ```
 
-> Do not commit your `.env` file to GitHub.
+Do not commit the `.env` file to GitHub.
 
----
+### 5. Configure PostgreSQL
 
-## 📥 Data Ingestion
+Make sure PostgreSQL is running and create the required database.
 
-The ingestion layer retrieves and processes financial datasets before storing them in PostgreSQL.
+Then run:
 
-### RBI data
+```bash
+python database/create_tables.py
+```
+
+### 6. Test the database connection
+
+```bash
+python database/test_connection.py
+```
+
+### 7. Run data ingestion
+
+Run the appropriate ingestion scripts:
 
 ```bash
 python ingestion/rbi_ingestion.py
 ```
 
-### Oil data
+and:
 
 ```bash
 python ingestion/oil_ingestion.py
 ```
 
----
-
-## 📊 Run Analytics
-
-To generate analytics and engineered financial features:
+### 8. Run analytics
 
 ```bash
 python analytics/rbi_analytics.py
 ```
 
-The analytics layer calculates indicators such as:
-
-* Daily returns
-* Moving averages
-* Volatility
-* Lag features
-* Exchange-rate statistics
-
----
-
-## 🤖 Run Prediction
-
-The prediction module can be executed using:
-
-```bash
-python prediction/predict.py
-```
-
-Feature construction is handled through:
+### 9. Run the prediction pipeline
 
 ```bash
 python prediction/feature_builder.py
 ```
 
+```bash
+python prediction/predict.py
+```
+
+### 10. Start the API
+
+```bash
+uvicorn api.main:app --reload
+```
+
+The API will normally be available at:
+
+```text
+http://127.0.0.1:8000
+```
+
+### 11. Start the dashboard
+
+Open another terminal:
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+The Vite development server will provide the local dashboard URL in the terminal.
+
 ---
 
 ## 🔄 Daily Update Pipeline
 
-InsightIQ AI includes a pipeline designed to automate the data-update process.
+The project includes a daily update pipeline designed to refresh the analytics workflow.
 
 Run:
 
@@ -328,152 +426,72 @@ Run:
 python pipeline/daily_update.py
 ```
 
-The pipeline is intended to:
-
-1. Fetch updated financial data
-2. Validate incoming data
-3. Update the database
-4. Generate analytical features
-5. Prepare data for prediction
-6. Refresh the analytics layer
+The pipeline is intended to coordinate the latest available data with downstream processing and prediction.
 
 ---
 
-## ⚡ Start the FastAPI Backend
+## 🔐 Security
 
-Run the API using:
+Sensitive configuration should be stored in environment variables.
 
-```bash
-uvicorn api.main:app --reload
-```
-
-The backend provides the API layer required by the dashboard.
-
----
-
-## 💻 Start the React Dashboard
-
-Open another terminal:
-
-```bash
-cd dashboard
-```
-
-Install frontend dependencies:
-
-```bash
-npm install
-```
-
-Start the development server:
-
-```bash
-npm run dev
-```
-
-The dashboard will then be available through the local Vite development server.
-
----
-
-## 🧪 Testing
-
-Basic project setup can be tested using:
-
-```bash
-python test_setup.py
-```
-
-Database connectivity can be tested using:
-
-```bash
-python database/test_connection.py
-```
-
-Database tables can be inspected using:
-
-```bash
-python check_tables.py
-```
-
----
-
-## 📈 Analytics Capabilities
-
-The platform provides several analytical perspectives on USD/INR behavior.
-
-### Trend Analysis
-
-Historical exchange-rate trends can be analyzed across different time periods.
-
-### Moving Averages
-
-Short-term and long-term moving averages help identify underlying trends.
-
-### Volatility
-
-Historical volatility is calculated to understand periods of increased currency movement.
-
-### Return Analysis
-
-Daily percentage returns are used as machine-learning features and for market-movement analysis.
-
-### External Market Signals
-
-WTI crude oil prices are incorporated as an external feature to investigate relationships between commodity prices and currency movements.
-
----
-
-## 🎯 Project Goals
-
-The primary objectives of InsightIQ AI are to:
-
-* Build a complete end-to-end analytics pipeline
-* Automate financial-data ingestion
-* Store structured market data in PostgreSQL
-* Apply data analytics and feature engineering
-* Experiment with machine learning for currency forecasting
-* Expose analytical results through APIs
-* Present insights through an interactive dashboard
-
----
-
-## 🔮 Future Enhancements
-
-Potential future improvements include:
-
-* Real-time financial data integration
-* Automated model retraining
-* Advanced time-series forecasting models
-* XGBoost/LightGBM model comparison
-* LSTM/Transformer-based forecasting
-* Automated model performance monitoring
-* SHAP-based model explainability
-* More macroeconomic indicators
-* Automated anomaly detection
-* Cloud deployment
-* CI/CD pipeline
-* Scheduled daily production updates
-* Advanced financial alerts and notifications
-
----
-
-## 🔐 Security & Data Handling
-
-Sensitive configuration values such as database credentials and API keys are stored through environment variables.
-
-The repository excludes:
+The following files and directories are intentionally excluded from Git:
 
 ```text
-.env
 .venv/
+.env
 __pycache__/
 data/raw/
 data/processed/
 models/*.pkl
 models/*.joblib
+.vscode/
+*.log
 ```
 
-These files should not be committed to the public repository.
+This prevents local environments, credentials, generated datasets, and model artifacts from being accidentally committed.
+
+---
+
+## 🎯 Project Goals
+
+InsightIQ AI was designed to demonstrate how a modern analytics system can combine:
+
+```text
+Data Engineering
+        ↓
+Data Analytics
+        ↓
+Statistical Feature Engineering
+        ↓
+Machine Learning
+        ↓
+API Development
+        ↓
+Interactive Visualization
+```
+
+The project focuses on building an end-to-end workflow rather than treating machine learning as an isolated model.
+
+---
+
+## 🔮 Future Improvements
+
+Potential future improvements include:
+
+* Automated scheduled data ingestion
+* More external economic indicators
+* Additional forecasting models
+* XGBoost and Gradient Boosting comparison
+* Advanced time-series models
+* Model monitoring
+* Automated model retraining
+* Prediction confidence intervals
+* Advanced dashboard filtering
+* Real-time market alerts
+* Deployment using Docker
+* Cloud database deployment
+* CI/CD automation
+* Automated data-quality monitoring
 
 ---
 
@@ -484,12 +502,20 @@ These files should not be committed to the public repository.
 B.Tech (Hons.) Computer Science & Engineering
 XIM University, Bhubaneswar
 
-GitHub: [Soumyasatapathy1819](https://github.com/Soumyasatapathy1819)
+### Areas of Interest
+
+* Data Analytics
+* Data Science
+* Artificial Intelligence & Machine Learning
+* Business Intelligence
+* Full-Stack Development
+* Data Engineering
 
 ---
 
 ## ⭐ Project
 
-**InsightIQ AI — AI-Powered Business Intelligence & Currency Analytics Platform**
+If you find this project useful or interesting, consider giving the repository a star.
 
-Built with Python, PostgreSQL, FastAPI, React, and Machine Learning.
+**GitHub:**
+https://github.com/Soumyasatapathy1819/InsightIQ-AI
