@@ -1,199 +1,744 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 
 import {
   Activity,
-  ArrowUpRight,
   BarChart3,
   Brain,
-  CalendarDays,
-  CircleDollarSign,
-  Cpu,
   Database,
+  Download,
   Droplets,
   Gauge,
   Layers3,
   LayoutDashboard,
-  LineChart,
+  LineChart as LineChartIcon,
+  Moon,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
+  Sun,
   TrendingDown,
   TrendingUp,
-  Waves,
   Zap,
 } from "lucide-react";
 
 import {
+  Area,
+  Bar,
+  BarChart,
   CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
   Line,
-  LineChart as RechartsLineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+/* =========================================================
+   CONFIG
+========================================================= */
 
-const navItems = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "market", label: "Market Monitor", icon: LineChart },
-  { id: "prediction", label: "Predictions", icon: TrendingUp },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
-  { id: "pipeline", label: "Pipeline", icon: Cpu },
-  { id: "insights", label: "Model Insights", icon: Brain },
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const api = axios.create({ baseURL: API_BASE_URL, timeout: 20000 });
+const REFRESH_MS = 5 * 60 * 1000;
+
+const RANGES = [
+  { id: "1M", days: 30 },
+  { id: "3M", days: 90 },
+  { id: "6M", days: 180 },
+  { id: "1Y", days: 365 },
+  { id: "5Y", days: 1825 },
+  { id: "ALL", days: null },
 ];
 
+const VIEWS = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "market", label: "Market", icon: LineChartIcon },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "oil", label: "Oil Signals", icon: Droplets },
+  { id: "model", label: "Model", icon: Brain },
+];
+
+const TITLES = {
+  overview: ["Overview", "USD/INR intelligence at a glance"],
+  market: ["Market", "Rates, moving averages and cross-currency comparison"],
+  analytics: ["Analytics", "Volatility, monthly trends and key statistics"],
+  oil: ["Oil signals", "WTI crude-oil context used by the model"],
+  model: ["Model", "How the forecast is produced"],
+};
+
+const PIPELINE = [
+  { icon: Database, title: "RBI reference rates", text: "Daily exchange-rate history is validated and stored in PostgreSQL." },
+  { icon: Droplets, title: "WTI crude signals", text: "Oil price, returns, moving averages and volatility add market context." },
+  { icon: Layers3, title: "Feature engineering", text: "Lags, moving averages, returns and volatility build the model input." },
+  { icon: Brain, title: "Random Forest", text: "A trained regression model estimates the next-day move." },
+  { icon: Zap, title: "Next-day forecast", text: "The estimate is converted into a USD/INR rate and direction." },
+];
+
+const PALETTE = {
+  dark: {
+    grid: "rgba(148,163,184,0.12)",
+    axis: "#8392aa",
+    accent: "#4f9dff",
+    accent2: "#a78bfa",
+    ma7: "#fbbf24",
+    ma30: "#34d399",
+    up: "#34d399",
+    down: "#f87171",
+    tooltipBg: "#0b1220",
+    tooltipBorder: "#24324a",
+    tooltipText: "#e6ebf4",
+    lines: ["#4f9dff", "#34d399", "#fbbf24", "#f87171", "#a78bfa", "#22d3ee", "#f472b6"],
+  },
+  light: {
+    grid: "rgba(71,85,105,0.14)",
+    axis: "#64748b",
+    accent: "#2563eb",
+    accent2: "#7c3aed",
+    ma7: "#d97706",
+    ma30: "#059669",
+    up: "#059669",
+    down: "#dc2626",
+    tooltipBg: "#ffffff",
+    tooltipBorder: "#d5deeb",
+    tooltipText: "#0f172a",
+    lines: ["#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#db2777"],
+  },
+};
+
 /* =========================================================
-   FORMATTERS
+   HELPERS
 ========================================================= */
 
-function formatCurrency(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    !Number.isFinite(Number(value))
-  ) {
-    return "₹--";
-  }
+const isNum = (v) =>
+  v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v));
 
-  return `₹${Number(value).toFixed(4)}`;
+const fmt = (v, d = 4) => (isNum(v) ? Number(v).toFixed(d) : "--");
+
+const fmtINR = (v, d = 4) => (isNum(v) ? `₹${Number(v).toFixed(d)}` : "₹--");
+
+const fmtSigned = (v, d = 4, suffix = "") =>
+  isNum(v) ? `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${suffix}` : "--";
+
+const fmtDate = (v) => {
+  if (!v) return "--";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+
+const labelOf = (code) => (code || "").replace(/_inr$/i, "").toUpperCase() + "/INR";
+
+const pick = (obj, keys) => {
+  for (const k of keys) {
+    if (obj?.[k] !== undefined && obj?.[k] !== null) return obj[k];
+  }
+  return null;
+};
+
+const toNum = (v) => (isNum(v) ? Number(v) : null);
+
+function makeTickFormatter(days) {
+  return (value) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return days && days <= 180
+      ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+      : d.toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+  };
 }
 
-function formatPercent(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    !Number.isFinite(Number(value))
-  ) {
-    return "--";
-  }
-
-  return `${Number(value) >= 0 ? "+" : ""}${Number(value).toFixed(4)}%`;
+function monthTick(value) {
+  const d = new Date(`${value}-01`);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
 }
 
-function formatDate(dateValue) {
-  if (!dateValue) return "--";
+function downsample(rows, max = 700) {
+  if (rows.length <= max) return rows;
+  const step = Math.ceil(rows.length / max);
+  const out = rows.filter((_, i) => i % step === 0);
+  const last = rows[rows.length - 1];
+  if (out[out.length - 1] !== last) out.push(last);
+  return out;
+}
 
-  const date = new Date(dateValue);
+function downloadCsv(rows, currency) {
+  const header = ["date", "rate", "ma_7", "ma_30", "change_pct", "volatility_30"];
+  const lines = [
+    header.join(","),
+    ...rows.map((r) => header.map((h) => r[h] ?? "").join(",")),
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `insightiq_${currency}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
-  if (Number.isNaN(date.getTime())) {
-    return String(dateValue).slice(0, 10);
+function normalizePrediction(raw) {
+  if (!raw || typeof raw !== "object") return null;
+
+  const current = toNum(pick(raw, ["current_usd_inr", "current_rate", "current"]));
+  const forecast = toNum(pick(raw, ["predicted_usd_inr", "predicted_rate", "forecast"]));
+  let expectedChange = toNum(pick(raw, ["expected_change", "expected_change_inr"]));
+  let returnPct = toNum(
+    pick(raw, ["predicted_return_percent", "predicted_return", "return_percent"])
+  );
+
+  if (expectedChange === null && current !== null && forecast !== null) {
+    expectedChange = forecast - current;
+  }
+  if (returnPct === null && current && forecast !== null) {
+    returnPct = ((forecast - current) / current) * 100;
   }
 
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
+  let direction = String(raw.direction ?? "").toUpperCase();
+  if (direction !== "UP" && direction !== "DOWN") {
+    direction = expectedChange === null ? "" : expectedChange >= 0 ? "UP" : "DOWN";
+  }
+
+  return {
+    current,
+    forecast,
+    expectedChange,
+    returnPct,
+    direction,
+    date: pick(raw, ["prediction_date", "date"]),
+  };
+}
+
+function usePersistedState(key, initial) {
+  const [value, setValue] = useState(() => {
+    try {
+      return localStorage.getItem(key) ?? initial;
+    } catch {
+      return initial;
+    }
   });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* storage unavailable - ignore */
+    }
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
+const axisProps = (pal) => ({
+  tick: { fill: pal.axis, fontSize: 11 },
+  tickLine: false,
+  axisLine: false,
+});
+
+const tooltipProps = (pal, digits = 4, labelFormatter = fmtDate) => ({
+  contentStyle: {
+    background: pal.tooltipBg,
+    border: `1px solid ${pal.tooltipBorder}`,
+    borderRadius: 10,
+    color: pal.tooltipText,
+    fontSize: 12,
+  },
+  labelStyle: { color: pal.axis, marginBottom: 4 },
+  itemStyle: { color: pal.tooltipText },
+  labelFormatter,
+  formatter: (value, name) => [isNum(value) ? Number(value).toFixed(digits) : "--", name],
+  cursor: { stroke: pal.axis, strokeDasharray: "4 4" },
+});
+
+/* =========================================================
+   SMALL COMPONENTS
+========================================================= */
+
+function Panel({ title, subtitle, icon: Icon, actions, children, className = "" }) {
+  return (
+    <section className={`panel ${className}`}>
+      <header className="panel-head">
+        <div className="panel-title">
+          {Icon && (
+            <span className="panel-icon">
+              <Icon size={16} />
+            </span>
+          )}
+          <div>
+            <h3>{title}</h3>
+            {subtitle && <p>{subtitle}</p>}
+          </div>
+        </div>
+        {actions && <div className="panel-actions">{actions}</div>}
+      </header>
+      <div className="panel-body">{children}</div>
+    </section>
+  );
+}
+
+function ChartBox({ loading, empty, emptyText, size = "", children }) {
+  return (
+    <div className={`chart-box ${size}`}>
+      {loading ? (
+        <div className="skeleton" />
+      ) : empty ? (
+        <div className="empty">
+          <Activity size={26} />
+          <span>{emptyText}</span>
+        </div>
+      ) : (
+        children
+      )}
+    </div>
+  );
+}
+
+function Kpi({ label, value, sub, tone = "", loading }) {
+  return (
+    <div className="kpi">
+      <span className="kpi-label">{label}</span>
+      {loading ? (
+        <div className="skeleton line" />
+      ) : (
+        <strong className={`kpi-value ${tone}`}>{value}</strong>
+      )}
+      <small className="kpi-sub">{sub}</small>
+    </div>
+  );
+}
+
+function Segmented({ options, value, onChange }) {
+  return (
+    <div className="segmented" role="tablist">
+      {options.map((o) => (
+        <button
+          key={o}
+          role="tab"
+          aria-selected={value === o}
+          className={value === o ? "active" : ""}
+          onClick={() => onChange(o)}
+        >
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DirectionBadge({ direction }) {
+  const cls = direction === "UP" ? "up" : direction === "DOWN" ? "down" : "neutral";
+  const Icon = direction === "UP" ? TrendingUp : direction === "DOWN" ? TrendingDown : Activity;
+  return (
+    <span className={`badge ${cls}`}>
+      <Icon size={14} />
+      {direction || "WAITING"}
+    </span>
+  );
 }
 
 /* =========================================================
-   NORMALIZE HISTORY DATA
-
-   Handles:
-   - Array response
-   - { history: [] }
-   - { data: [] }
-   - { results: [] }
-
-   Also supports different backend field names.
+   CHARTS
 ========================================================= */
 
-function normalizeHistoryResponse(responseData) {
-  let rows = [];
+function MarketChart({ rows, pal, showMa7, showMa30, forecast, tickFmt, label }) {
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <ComposedChart data={rows} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id="rateFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={pal.accent} stopOpacity={0.32} />
+            <stop offset="100%" stopColor={pal.accent} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke={pal.grid} strokeDasharray="3 5" vertical={false} />
+        <XAxis dataKey="date" tickFormatter={tickFmt} minTickGap={40} {...axisProps(pal)} />
+        <YAxis
+          domain={["auto", "auto"]}
+          width={56}
+          tickFormatter={(v) => Number(v).toFixed(2)}
+          {...axisProps(pal)}
+        />
+        <Tooltip {...tooltipProps(pal)} />
+        <Area
+          type="monotone"
+          dataKey="rate"
+          name={label}
+          stroke={pal.accent}
+          strokeWidth={2}
+          fill="url(#rateFill)"
+          dot={false}
+          isAnimationActive={false}
+        />
+        {showMa7 && (
+          <Line
+            type="monotone"
+            dataKey="ma_7"
+            name="7-day MA"
+            stroke={pal.ma7}
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+        )}
+        {showMa30 && (
+          <Line
+            type="monotone"
+            dataKey="ma_30"
+            name="30-day MA"
+            stroke={pal.ma30}
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+        )}
+        {forecast !== null && (
+          <ReferenceLine
+            y={forecast}
+            stroke={pal.accent2}
+            strokeDasharray="5 4"
+            label={{
+              value: `AI forecast ${forecast.toFixed(4)}`,
+              fill: pal.accent2,
+              fontSize: 11,
+              position: "insideTopRight",
+            }}
+          />
+        )}
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
 
-  if (Array.isArray(responseData)) {
-    rows = responseData;
-  } else if (Array.isArray(responseData?.history)) {
-    rows = responseData.history;
-  } else if (Array.isArray(responseData?.data)) {
-    rows = responseData.data;
-  } else if (Array.isArray(responseData?.results)) {
-    rows = responseData.results;
+function VolatilityChart({ rows, pal, tickFmt }) {
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <ComposedChart data={rows} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id="volFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={pal.accent2} stopOpacity={0.32} />
+            <stop offset="100%" stopColor={pal.accent2} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke={pal.grid} strokeDasharray="3 5" vertical={false} />
+        <XAxis dataKey="date" tickFormatter={tickFmt} minTickGap={40} {...axisProps(pal)} />
+        <YAxis width={48} tickFormatter={(v) => `${Number(v).toFixed(2)}%`} {...axisProps(pal)} />
+        <Tooltip {...tooltipProps(pal, 3)} />
+        <Area
+          type="monotone"
+          dataKey="volatility_30"
+          name="30-day volatility (%)"
+          stroke={pal.accent2}
+          strokeWidth={2}
+          fill="url(#volFill)"
+          dot={false}
+          isAnimationActive={false}
+        />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+function MonthlyChart({ rows, pal }) {
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={rows} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke={pal.grid} strokeDasharray="3 5" vertical={false} />
+        <XAxis dataKey="month" tickFormatter={monthTick} minTickGap={20} {...axisProps(pal)} />
+        <YAxis width={48} tickFormatter={(v) => `${Number(v).toFixed(1)}%`} {...axisProps(pal)} />
+        <Tooltip
+          {...tooltipProps(pal, 3, monthTick)}
+          cursor={{ fill: pal.grid }}
+        />
+        <ReferenceLine y={0} stroke={pal.axis} />
+        <Bar dataKey="change_pct" name="Change in monthly average (%)" radius={[3, 3, 0, 0]}>
+          {rows.map((r) => (
+            <Cell key={r.month} fill={Number(r.change_pct) >= 0 ? pal.up : pal.down} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function CompareChart({ rows, codes, currency, pal, tickFmt }) {
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <ComposedChart data={rows} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke={pal.grid} strokeDasharray="3 5" vertical={false} />
+        <XAxis dataKey="date" tickFormatter={tickFmt} minTickGap={40} {...axisProps(pal)} />
+        <YAxis
+          domain={["auto", "auto"]}
+          width={48}
+          tickFormatter={(v) => Number(v).toFixed(0)}
+          {...axisProps(pal)}
+        />
+        <Tooltip {...tooltipProps(pal, 2)} />
+        <Legend wrapperStyle={{ fontSize: 12, color: pal.axis }} />
+        <ReferenceLine y={100} stroke={pal.axis} strokeDasharray="4 4" />
+        {codes.map((code, i) => (
+          <Line
+            key={code}
+            type="monotone"
+            dataKey={code}
+            name={labelOf(code)}
+            stroke={pal.lines[i % pal.lines.length]}
+            strokeWidth={code === currency ? 2.5 : 1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+        ))}
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* =========================================================
+   SECTIONS
+========================================================= */
+
+function StatsGrid({ stats, loading }) {
+  if (loading && !stats) {
+    return (
+      <div className="grid-stats">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="stat skeleton" />
+        ))}
+      </div>
+    );
   }
+  if (!stats) return null;
 
-  return rows
-    .map((row) => {
-      const date =
-        row?.date ??
-        row?.Date ??
-        row?.prediction_date ??
-        row?.predictionDate ??
-        row?.timestamp;
+  const trendUp = isNum(stats.ma_7) && isNum(stats.ma_30) && stats.ma_7 >= stats.ma_30;
 
-      const usd =
-        row?.usd_inr ??
-        row?.USD_INR ??
-        row?.usdInr ??
-        row?.usd_inr_rate ??
-        row?.usd_rate ??
-        row?.rate ??
-        row?.value ??
-        row?.close;
-
-      const numericUsd = Number(usd);
-
-      if (!date || !Number.isFinite(numericUsd)) {
-        return null;
-      }
-
-      const parsedDate = new Date(date);
-
-      if (Number.isNaN(parsedDate.getTime())) {
-        return null;
-      }
-
-      return {
-        date: parsedDate.toISOString().slice(0, 10),
-        usd_inr: numericUsd,
-        dateLabel: parsedDate.toLocaleDateString("en-IN", {
-          day: "2-digit",
-          month: "short",
-        }),
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.date.localeCompare(b.date));
-}
-
-/* =========================================================
-   INTERACTIVE 3D CARD
-========================================================= */
-
-function TiltCard({ children, className = "", ...props }) {
-  const handleMove = (event) => {
-    const element = event.currentTarget;
-    const rect = element.getBoundingClientRect();
-
-    const x = (event.clientX - rect.left) / rect.width - 0.5;
-    const y = (event.clientY - rect.top) / rect.height - 0.5;
-
-    element.style.setProperty("--rx", `${y * -4}deg`);
-    element.style.setProperty("--ry", `${x * 4}deg`);
-    element.style.setProperty("--mx", `${(x + 0.5) * 100}%`);
-    element.style.setProperty("--my", `${(y + 0.5) * 100}%`);
-  };
-
-  const reset = (event) => {
-    const element = event.currentTarget;
-
-    element.style.setProperty("--rx", "0deg");
-    element.style.setProperty("--ry", "0deg");
-    element.style.setProperty("--mx", "50%");
-    element.style.setProperty("--my", "50%");
-  };
+  const items = [
+    { label: "52-week high", value: fmt(stats.high_52w), sub: fmtDate(stats.high_52w_date) },
+    { label: "52-week low", value: fmt(stats.low_52w), sub: fmtDate(stats.low_52w_date) },
+    { label: "30-day average", value: fmt(stats.avg_30d), sub: `Latest ${fmt(stats.latest)}` },
+    {
+      label: "30-day volatility",
+      value: `${fmt(stats.volatility_30, 3)}%`,
+      sub: `Regime: ${stats.regime}`,
+    },
+    {
+      label: "Largest daily rise (1Y)",
+      value: fmtSigned(stats.best_day?.change_pct, 3, "%"),
+      sub: fmtDate(stats.best_day?.date),
+    },
+    {
+      label: "Largest daily fall (1Y)",
+      value: fmtSigned(stats.worst_day?.change_pct, 3, "%"),
+      sub: fmtDate(stats.worst_day?.date),
+    },
+    {
+      label: "Trend (7D vs 30D MA)",
+      value: trendUp ? "Rising" : "Falling",
+      sub: "Higher rate = weaker rupee",
+    },
+    {
+      label: "Data points",
+      value: String(stats.data_points ?? "--"),
+      sub: `${fmtDate(stats.first_date)} → ${fmtDate(stats.last_date)}`,
+    },
+  ];
 
   return (
-    <div
-      className={`tilt-card ${className}`}
-      onMouseMove={handleMove}
-      onMouseLeave={reset}
-      {...props}
-    >
-      {children}
+    <div className="grid-stats">
+      {items.map((item) => (
+        <div className="stat" key={item.label}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+          <small>{item.sub}</small>
+        </div>
+      ))}
     </div>
+  );
+}
+
+function PredictionPanel({ prediction, loading, features }) {
+  const p = prediction;
+
+  return (
+    <Panel title="AI forecast" subtitle="Next trading day · USD/INR" icon={Brain}>
+      <div className="forecast">
+        <span className="muted">Predicted rate</span>
+        {loading && !p ? (
+          <div className="skeleton line big" />
+        ) : (
+          <strong className="forecast-value">{fmtINR(p?.forecast)}</strong>
+        )}
+        <DirectionBadge direction={p?.direction} />
+      </div>
+
+      <dl className="kv">
+        <div>
+          <dt>Latest rate</dt>
+          <dd>{fmtINR(p?.current)}</dd>
+        </div>
+        <div>
+          <dt>Expected change</dt>
+          <dd>{fmtSigned(p?.expectedChange, 4)}</dd>
+        </div>
+        <div>
+          <dt>Expected return</dt>
+          <dd>{fmtSigned(p?.returnPct, 4, "%")}</dd>
+        </div>
+        <div>
+          <dt>Prediction date</dt>
+          <dd>{fmtDate(p?.date)}</dd>
+        </div>
+        <div>
+          <dt>Model</dt>
+          <dd>
+            Random Forest
+            {features?.features?.count ? ` · ${features.features.count} features` : ""}
+          </dd>
+        </div>
+      </dl>
+
+      <p className="note">
+        Experimental model output for learning and analysis. It is not financial advice.
+      </p>
+    </Panel>
+  );
+}
+
+function OilView({ signals, loading, pal }) {
+  const oil = signals?.oil;
+
+  if (!oil) {
+    return (
+      <Panel title="Oil signals" subtitle="WTI crude-oil context" icon={Droplets}>
+        {loading ? (
+          <div className="chart-box short">
+            <div className="skeleton" />
+          </div>
+        ) : (
+          <div className="empty">
+            <Droplets size={26} />
+            <span>Oil signals are unavailable. Check the /api/signals endpoint.</span>
+          </div>
+        )}
+      </Panel>
+    );
+  }
+
+  const returns = [
+    { name: "1D", value: oil.return_1d },
+    { name: "7D", value: oil.return_7d },
+    { name: "30D", value: oil.return_30d },
+  ];
+  const above = isNum(oil.price) && isNum(oil.ma_30) && oil.price >= oil.ma_30;
+
+  const items = [
+    { label: "WTI price", value: fmt(oil.price, 2), sub: `As of ${fmtDate(signals.date)}` },
+    { label: "7-day MA", value: fmt(oil.ma_7, 2), sub: "Short-term average" },
+    { label: "30-day MA", value: fmt(oil.ma_30, 2), sub: "Medium-term average" },
+    { label: "7-day volatility", value: fmt(oil.volatility_7, 4), sub: "Model units" },
+    { label: "30-day volatility", value: fmt(oil.volatility_30, 4), sub: "Model units" },
+  ];
+
+  return (
+    <>
+      <div className="grid-stats">
+        {items.map((item) => (
+          <div className="stat" key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+            <small>{item.sub}</small>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid-2">
+        <Panel title="Oil returns" subtitle="1, 7 and 30-day returns (model units)" icon={Droplets}>
+          <ChartBox size="short">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={returns} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke={pal.grid} strokeDasharray="3 5" vertical={false} />
+                <XAxis dataKey="name" {...axisProps(pal)} />
+                <YAxis width={48} {...axisProps(pal)} />
+                <Tooltip {...tooltipProps(pal, 4, (l) => `${l} return`)} cursor={{ fill: pal.grid }} />
+                <ReferenceLine y={0} stroke={pal.axis} />
+                <Bar dataKey="value" name="Return" radius={[3, 3, 0, 0]}>
+                  {returns.map((r) => (
+                    <Cell key={r.name} fill={Number(r.value) >= 0 ? pal.up : pal.down} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartBox>
+        </Panel>
+
+        <Panel title="Reading the signal" subtitle="Context, not a rule" icon={Gauge}>
+          <ul className="insight-list">
+            <li>
+              Oil is trading <strong>{above ? "above" : "below"}</strong> its 30-day average, so
+              recent momentum is <strong>{above ? "positive" : "negative"}</strong>.
+            </li>
+            <li>
+              India imports most of its crude, so higher oil can raise the import bill and put
+              pressure on the rupee. The link is not constant.
+            </li>
+            <li>
+              The model uses these oil features alongside the USD/INR features. It does not
+              assume a fixed relationship.
+            </li>
+          </ul>
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+function ModelView({ features, prediction, loading }) {
+  const names = features?.features?.names ?? [];
+
+  return (
+    <>
+      <div className="grid-2">
+        <PredictionPanel prediction={prediction} loading={loading} features={features} />
+
+        <Panel
+          title="Model inputs"
+          subtitle={`${features?.features?.count ?? "--"} engineered features at ${fmtDate(features?.date)}`}
+          icon={Layers3}
+        >
+          {names.length ? (
+            <div className="chips">
+              {names.map((n) => (
+                <span className="tag" key={n}>
+                  {n}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="empty">
+              <Layers3 size={26} />
+              <span>{loading ? "Loading features..." : "Feature list unavailable."}</span>
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <Panel title="Data pipeline" subtitle="From raw observations to the forecast" icon={Zap}>
+        <div className="pipeline">
+          {PIPELINE.map(({ icon: Icon, title, text }, i) => (
+            <div className="pipe-step" key={title}>
+              <span className="pipe-icon">
+                <Icon size={18} />
+              </span>
+              <b>{String(i + 1).padStart(2, "0")}</b>
+              <strong>{title}</strong>
+              <p>{text}</p>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </>
   );
 }
 
@@ -201,1929 +746,432 @@ function TiltCard({ children, className = "", ...props }) {
    APP
 ========================================================= */
 
-function App() {
+export default function App() {
+  const [theme, setTheme] = usePersistedState("insightiq-theme", "dark");
+  const [view, setView] = useState("overview");
+  const [currency, setCurrency] = useState("usd_inr");
+  const [range, setRange] = useState("1Y");
+  const [showMa7, setShowMa7] = useState(true);
+  const [showMa30, setShowMa30] = useState(true);
+
+  const [currencies, setCurrencies] = useState([{ code: "usd_inr", label: "USD/INR" }]);
   const [prediction, setPrediction] = useState(null);
+  const [signals, setSignals] = useState(null);
+  const [features, setFeatures] = useState(null);
+
   const [history, setHistory] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [monthly, setMonthly] = useState([]);
+  const [compare, setCompare] = useState(null);
 
-  const [loading, setLoading] = useState(true);
-  const [historyLoading, setHistoryLoading] = useState(true);
+  const [coreLoading, setCoreLoading] = useState(true);
+  const [marketLoading, setMarketLoading] = useState(true);
+  const [errors, setErrors] = useState({ core: null, market: null });
+  const [apiOnline, setApiOnline] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
 
-  const [error, setError] = useState(null);
-  const [activeSection, setActiveSection] = useState("dashboard");
+  const requestId = useRef(0);
 
-  /* =======================================================
-     FETCH PREDICTION
-  ======================================================= */
+  /* ---------- theme ---------- */
 
-  const fetchPrediction = useCallback(async () => {
-    try {
-      const response = await axios.get(
-        `${API_BASE_URL}/api/prediction`,
-        {
-          timeout: 10000,
-        }
-      );
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
-      console.log("Prediction API response:", response.data);
+  /* ---------- core data (prediction, currencies, signals, features) ---------- */
 
-      setPrediction(response.data);
-
-      return response.data;
-    } catch (err) {
-      console.error("Prediction API error:", err);
-      throw err;
-    }
-  }, []);
-
-  /* =======================================================
-     FETCH HISTORY
-  ======================================================= */
-
-  const fetchHistory = useCallback(async () => {
-    setHistoryLoading(true);
-
-    try {
-      const response = await axios.get(
-        `${API_BASE_URL}/api/history`,
-        {
-          timeout: 10000,
-        }
-      );
-
-      console.log(
-        "Historical API response:",
-        response.data
-      );
-
-      const normalized = normalizeHistoryResponse(
-        response.data
-      );
-
-      console.log(
-        "Normalized chart rows:",
-        normalized.length,
-        normalized.slice(0, 3)
-      );
-
-      setHistory(normalized);
-
-      return normalized;
-    } catch (err) {
-      console.error("History API error:", err);
-
-      setHistory([]);
-
-      throw err;
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  /* =======================================================
-     REFRESH EVERYTHING
-  ======================================================= */
-
-  const refreshAll = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const loadCore = useCallback(async () => {
+    setCoreLoading(true);
 
     const results = await Promise.allSettled([
-      fetchPrediction(),
-      fetchHistory(),
+      api.get("/api/prediction"),
+      api.get("/api/currencies"),
+      api.get("/api/signals"),
+      api.get("/api/features"),
     ]);
 
-    const predictionFailed =
-      results[0].status === "rejected";
+    const [pred, curr, sig, feat] = results;
 
-    const historyFailed =
-      results[1].status === "rejected";
-
-    if (predictionFailed && historyFailed) {
-      setError(
-        "Unable to connect to the InsightIQ AI backend."
-      );
-    } else if (predictionFailed) {
-      setError(
-        "Prediction service is unavailable. Historical data may still be available."
-      );
-    } else if (historyFailed) {
-      setError(
-        "Historical data could not be loaded. Prediction service is still available."
-      );
+    if (pred.status === "fulfilled") setPrediction(normalizePrediction(pred.value.data));
+    if (curr.status === "fulfilled" && curr.value.data?.currencies?.length) {
+      setCurrencies(curr.value.data.currencies);
     }
+    if (sig.status === "fulfilled") setSignals(sig.value.data);
+    if (feat.status === "fulfilled") setFeatures(feat.value.data);
 
-    setLoading(false);
-  }, [fetchPrediction, fetchHistory]);
-
-  /* =======================================================
-     INITIAL LOAD
-  ======================================================= */
-
-  useEffect(() => {
-    refreshAll();
-  }, [refreshAll]);
-
-  /* =======================================================
-     AUTO REFRESH
-     Refreshes data every 5 minutes.
-======================================================= */
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      refreshAll();
-    }, 5 * 60 * 1000);
-
-    return () => clearInterval(interval);
-  }, [refreshAll]);
-
-  /* =======================================================
-     SIDEBAR SECTION OBSERVER
-  ======================================================= */
-
-  useEffect(() => {
-    const sections = navItems
-      .map((item) =>
-        document.querySelector(
-          `[data-section="${item.id}"]`
-        )
-      )
+    const names = ["prediction", "currencies", "signals", "features"];
+    const failed = results
+      .map((r, i) => (r.status === "rejected" ? names[i] : null))
       .filter(Boolean);
 
-    if (!sections.length) {
-      return undefined;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort(
-            (a, b) =>
-              b.intersectionRatio -
-              a.intersectionRatio
-          )[0];
-
-        if (visible?.target?.dataset?.section) {
-          setActiveSection(
-            visible.target.dataset.section
-          );
-        }
-      },
-      {
-        rootMargin: "-15% 0px -65% 0px",
-        threshold: [0.05, 0.15, 0.3],
-      }
-    );
-
-    sections.forEach((section) =>
-      observer.observe(section)
-    );
-
-    return () => observer.disconnect();
-  }, []);
-
-  /* =======================================================
-     NAVIGATION
-  ======================================================= */
-
-  const navigateTo = useCallback((section) => {
-    setActiveSection(section);
-
-    const target = document.querySelector(
-      `[data-section="${section}"]`
-    );
-
-    if (target) {
-      target.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }
-  }, []);
-
-  /* =======================================================
-     DERIVED VALUES
-  ======================================================= */
-
-  const direction =
-    prediction?.direction?.toUpperCase();
-
-  const directionUp = direction === "UP";
-  const directionDown = direction === "DOWN";
-
-  const current =
-    prediction?.current_usd_inr ??
-    prediction?.current_rate ??
-    prediction?.current;
-
-  const forecast =
-    prediction?.predicted_usd_inr ??
-    prediction?.predicted_rate ??
-    prediction?.forecast;
-
-  const expectedChange =
-    prediction?.expected_change ??
-    prediction?.expected_change_inr;
-
-  const predictedReturn =
-    prediction?.predicted_return_percent ??
-    prediction?.predicted_return ??
-    prediction?.return_percent;
-
-  /* =======================================================
-     CHART DATA
-  ======================================================= */
-
-  const chartData = useMemo(() => {
-    if (!history.length) {
-      return [];
-    }
-
-    return history.map((row) => ({
-      date: row.date,
-      dateLabel: row.dateLabel,
-      usd_inr: Number(row.usd_inr),
+    setApiOnline(failed.length < results.length);
+    setErrors((prev) => ({
+      ...prev,
+      core: failed.length ? `Could not load: ${failed.join(", ")}.` : null,
     }));
-  }, [history]);
+    setUpdatedAt(new Date());
+    setCoreLoading(false);
+  }, []);
 
-  /* =======================================================
-     LAST DATE
-  ======================================================= */
+  /* ---------- market data (depends on currency + range) ---------- */
 
-  const lastDate =
-    prediction?.prediction_date ||
-    prediction?.date ||
-    (history.length
-      ? history[history.length - 1]?.date
-      : null);
+  const loadMarket = useCallback(async () => {
+    const id = ++requestId.current;
+    setMarketLoading(true);
 
-  /* =======================================================
-     RENDER
-  ======================================================= */
+    const days = RANGES.find((r) => r.id === range)?.days ?? undefined;
 
-  return (
-    <div className="app-shell">
+    const results = await Promise.allSettled([
+      api.get("/api/history", { params: { currency, days } }),
+      api.get("/api/stats", { params: { currency } }),
+      api.get("/api/monthly", { params: { currency, months: 24 } }),
+      api.get("/api/compare", { params: { days } }),
+    ]);
 
-      {/* =================================================
-          BACKGROUND
-      ================================================= */}
+    // ignore responses that arrived after the user changed the selection
+    if (id !== requestId.current) return;
 
-      <div className="background-grid" />
+    const [h, s, m, c] = results;
 
-      <div className="ambient ambient-blue" />
-      <div className="ambient ambient-purple" />
-      <div className="ambient ambient-cyan" />
+    setHistory(h.status === "fulfilled" ? h.value.data?.data ?? [] : []);
+    setStats(s.status === "fulfilled" ? s.value.data : null);
+    setMonthly(m.status === "fulfilled" ? m.value.data?.data ?? [] : []);
+    setCompare(c.status === "fulfilled" ? c.value.data : null);
 
-      <div className="scanline" />
+    const names = ["history", "stats", "monthly", "comparison"];
+    const failed = results
+      .map((r, i) => (r.status === "rejected" ? names[i] : null))
+      .filter(Boolean);
 
-      <div
-        className="particles"
-        aria-hidden="true"
-      >
-        {Array.from({ length: 18 }).map(
-          (_, index) => (
-            <span
-              className="particle"
-              key={index}
-            />
-          )
-        )}
+    setErrors((prev) => ({
+      ...prev,
+      market: failed.length ? `Could not load: ${failed.join(", ")}.` : null,
+    }));
+    setUpdatedAt(new Date());
+    setMarketLoading(false);
+  }, [currency, range]);
+
+  useEffect(() => {
+    loadCore();
+  }, [loadCore]);
+
+  useEffect(() => {
+    loadMarket();
+  }, [loadMarket]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      loadCore();
+      loadMarket();
+    }, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [loadCore, loadMarket]);
+
+  const refreshAll = () => {
+    loadCore();
+    loadMarket();
+  };
+
+  /* ---------- derived ---------- */
+
+  const pal = PALETTE[theme] ?? PALETTE.dark;
+  const loading = coreLoading || marketLoading;
+  const currentLabel = currencies.find((c) => c.code === currency)?.label ?? labelOf(currency);
+  const rangeDays = RANGES.find((r) => r.id === range)?.days ?? null;
+  const tickFmt = useMemo(() => makeTickFormatter(rangeDays), [rangeDays]);
+
+  const chartRows = useMemo(() => downsample(history), [history]);
+  const compareRows = useMemo(() => downsample(compare?.data ?? []), [compare]);
+  const compareCodes = compare?.currencies ?? [];
+
+  const forecastLine = currency === "usd_inr" ? prediction?.forecast ?? null : null;
+  const banner = [errors.core, errors.market].filter(Boolean).join(" ");
+  const showToolbar = ["overview", "market", "analytics"].includes(view);
+  const [title, subtitle] = TITLES[view];
+
+  /* ---------- reusable blocks ---------- */
+
+  const toolbar = (
+    <div className="toolbar">
+      <div className="toolbar-group">
+        <label className="muted" htmlFor="currency">
+          Currency
+        </label>
+        <select
+          id="currency"
+          className="select"
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value)}
+        >
+          {currencies.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.label}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* =================================================
-          SIDEBAR
-      ================================================= */}
+      <Segmented options={RANGES.map((r) => r.id)} value={range} onChange={setRange} />
 
+      <div className="toolbar-group">
+        <button className={`chip ${showMa7 ? "on" : ""}`} onClick={() => setShowMa7((v) => !v)}>
+          7-day MA
+        </button>
+        <button className={`chip ${showMa30 ? "on" : ""}`} onClick={() => setShowMa30((v) => !v)}>
+          30-day MA
+        </button>
+        <button
+          className="btn ghost"
+          onClick={() => downloadCsv(history, currency)}
+          disabled={!history.length}
+        >
+          <Download size={14} />
+          CSV
+        </button>
+      </div>
+    </div>
+  );
+
+  const marketPanel = (size) => (
+    <Panel
+      title={`${currentLabel} price`}
+      subtitle="RBI reference rate · higher means a weaker rupee"
+      icon={LineChartIcon}
+      actions={<span className="muted small">{history.length} records</span>}
+    >
+      <ChartBox
+        size={size}
+        loading={marketLoading && !history.length}
+        empty={!history.length}
+        emptyText="No data received. Check the /api/history endpoint."
+      >
+        <MarketChart
+          rows={chartRows}
+          pal={pal}
+          showMa7={showMa7}
+          showMa30={showMa30}
+          forecast={forecastLine}
+          tickFmt={tickFmt}
+          label={currentLabel}
+        />
+      </ChartBox>
+    </Panel>
+  );
+
+  const statsLoading = marketLoading && !stats;
+
+  /* ---------- render ---------- */
+
+  return (
+    <div className="app">
       <aside className="sidebar">
-
-        <div className="sidebar-brand">
-
-          <div className="brand-logo">
-
-            <Brain
-              size={24}
-              strokeWidth={2.2}
-            />
-
-            <span className="brand-status" />
-
-          </div>
-
+        <div className="brand">
+          <span className="brand-mark">
+            <Brain size={20} />
+          </span>
           <div>
-
             <h1>
-              InsightIQ{" "}
-              <span>AI</span>
+              InsightIQ <span>AI</span>
             </h1>
-
-            <p>
-              Currency Intelligence Platform
-            </p>
-
+            <p>Currency intelligence</p>
           </div>
-
         </div>
 
-        <div className="sidebar-label">
-          INTELLIGENCE CONSOLE
-        </div>
-
-        <nav className="sidebar-nav">
-
-          {navItems.map(
-            ({
-              id,
-              label,
-              icon: Icon,
-            }) => (
-              <button
-                key={id}
-                className={`nav-item ${
-                  activeSection === id
-                    ? "active"
-                    : ""
-                }`}
-                onClick={() =>
-                  navigateTo(id)
-                }
-              >
-
-                <span className="nav-icon">
-                  <Icon size={17} />
-                </span>
-
-                <span>{label}</span>
-
-                {activeSection === id && (
-                  <i className="nav-active-glow" />
-                )}
-
-              </button>
-            )
-          )}
-
+        <nav className="nav">
+          {VIEWS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              className={`nav-item ${view === id ? "active" : ""}`}
+              onClick={() => setView(id)}
+            >
+              <Icon size={17} />
+              <span>{label}</span>
+            </button>
+          ))}
         </nav>
 
-        <div className="sidebar-status">
-
-          <div className="status-title">
-            AI ENGINE STATUS
+        <div className="sidebar-foot">
+          <div className="api-status">
+            <span className={`dot ${apiOnline === false ? "bad" : apiOnline ? "ok" : ""}`} />
+            {apiOnline === null
+              ? "Connecting..."
+              : apiOnline
+              ? "API connected"
+              : "API unreachable"}
           </div>
-
-          <div className="status-online">
-            <span />
-            ONLINE
-          </div>
-
-          <div
-            className="mini-wave"
-            aria-hidden="true"
-          >
-            {[
-              18,
-              28,
-              21,
-              35,
-              25,
-              42,
-              32,
-              46,
-            ].map(
-              (height, index) => (
-                <span
-                  key={index}
-                  style={{
-                    height,
-                  }}
-                />
-              )
-            )}
-          </div>
-
-          <div className="sidebar-update">
-            Latest model connection
-
-            <strong>
-              Pipeline synchronized
-            </strong>
-          </div>
-
-          <div className="system-operational">
-            <ShieldCheck size={13} />
-
-            All systems operational
-          </div>
-
+          <small>{API_BASE_URL}</small>
         </div>
-
       </aside>
 
-      {/* =================================================
-          MAIN CONTENT
-      ================================================= */}
-
-      <div className="main-content">
-
-        {/* TOP BAR */}
-
+      <div className="main">
         <header className="topbar">
-
-          <div className="topbar-context">
-
-            <span className="context-dot" />
-
-            LIVE MARKET INTELLIGENCE
-
+          <div>
+            <h2>{title}</h2>
+            <p>{subtitle}</p>
           </div>
 
           <div className="topbar-actions">
-
-            <div className="engine-online">
-
-              <span />
-
-              <div>
-
-                <strong>
-                  AI Engine Online
-                </strong>
-
-                <small>
-                  Pipeline synchronized
-                </small>
-
-              </div>
-
-            </div>
-
+            {updatedAt && (
+              <span className="muted small">
+                Updated {updatedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
             <button
-              className="refresh-button"
-              onClick={refreshAll}
-              disabled={loading}
+              className="icon-btn"
+              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+              aria-label="Toggle theme"
+              title="Toggle theme"
             >
-
-              <RefreshCw
-                size={15}
-                className={
-                  loading
-                    ? "spin"
-                    : ""
-                }
-              />
-
-              {loading
-                ? "Refreshing..."
-                : "Refresh Data"}
-
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
-
+            <button className="btn" onClick={refreshAll} disabled={loading}>
+              <RefreshCw size={14} className={loading ? "spin" : ""} />
+              {loading ? "Refreshing" : "Refresh"}
+            </button>
           </div>
-
         </header>
 
-        <main className="dashboard-content">
-
-          {/* =================================================
-              ERROR
-          ================================================= */}
-
-          {error && (
-            <div className="error-box">
-
+        <main className="content">
+          {banner && (
+            <div className="banner">
               <div>
-
-                <strong>
-                  Backend connection issue
-                </strong>
-
-                <span>
-                  {error}
-                </span>
-
+                <strong>Some data is unavailable.</strong> {banner} Is the API running at{" "}
+                {API_BASE_URL}?
               </div>
-
-              <button
-                onClick={refreshAll}
-              >
-                Try Again
+              <button className="btn ghost" onClick={refreshAll}>
+                Try again
               </button>
-
             </div>
           )}
 
-          {/* =================================================
-              HERO
-          ================================================= */}
+          {showToolbar && toolbar}
 
-          <section
-            className="hero-dashboard section-anchor"
-            data-section="dashboard"
-          >
+          {view === "overview" && (
+            <>
+              <section className="grid-kpi">
+                <Kpi
+                  label={`Latest ${currentLabel}`}
+                  value={fmtINR(stats?.latest)}
+                  sub={`${fmtSigned(stats?.change, 4)} (${fmtSigned(stats?.change_pct, 3, "%")}) · ${fmtDate(stats?.last_date)}`}
+                  tone={isNum(stats?.change) ? (stats.change >= 0 ? "pos" : "neg") : ""}
+                  loading={statsLoading}
+                />
+                <Kpi
+                  label="AI forecast · USD/INR"
+                  value={fmtINR(prediction?.forecast)}
+                  sub={`For ${fmtDate(prediction?.date)}`}
+                  loading={coreLoading && !prediction}
+                />
+                <Kpi
+                  label="Expected return"
+                  value={fmtSigned(prediction?.returnPct, 4, "%")}
+                  sub="Predicted next-day return"
+                  tone={isNum(prediction?.returnPct) ? (prediction.returnPct >= 0 ? "pos" : "neg") : ""}
+                  loading={coreLoading && !prediction}
+                />
+                <Kpi
+                  label="Model outlook"
+                  value={<DirectionBadge direction={prediction?.direction} />}
+                  sub="Random Forest direction"
+                  loading={coreLoading && !prediction}
+                />
+                <Kpi
+                  label="Volatility regime"
+                  value={(stats?.regime ?? "--").toUpperCase()}
+                  sub={`30-day volatility ${fmt(stats?.volatility_30, 3)}%`}
+                  tone={stats?.regime === "high" ? "neg" : stats?.regime === "low" ? "pos" : ""}
+                  loading={statsLoading}
+                />
+              </section>
 
-            <div className="hero-copy">
+              <section className="grid-main">
+                {marketPanel("")}
+                <PredictionPanel prediction={prediction} loading={coreLoading} features={features} />
+              </section>
 
-              <div className="hero-kicker">
+              <StatsGrid stats={stats} loading={statsLoading} />
+            </>
+          )}
 
-                <Sparkles size={13} />
+          {view === "market" && (
+            <>
+              {marketPanel("tall")}
 
-                AI-POWERED MARKET INTELLIGENCE
-
-              </div>
-
-              <h2>
-                Intelligence
-                <br />
-
-                <span>
-                  that moves markets.
-                </span>
-              </h2>
-
-              <p>
-                InsightIQ AI predicts tomorrow&apos;s
-                USD/INR exchange rate using
-                engineered currency features,
-                RBI reference data and crude-oil
-                market signals.
-              </p>
-
-              <div className="hero-chips">
-
-                <span>
-                  <Database size={12} />
-                  RBI data
-                </span>
-
-                <span>
-                  <Droplets size={12} />
-                  WTI signals
-                </span>
-
-                <span>
-                  <Brain size={12} />
-                  Random Forest
-                </span>
-
-                <span>
-                  <Layers3 size={12} />
-                  20 features
-                </span>
-
-              </div>
-
-              <div className="prediction-date">
-
-                <CalendarDays size={14} />
-
-                Prediction for
-
-                <strong>
-                  {formatDate(lastDate)}
-                </strong>
-
-              </div>
-
-            </div>
-
-            {/* =================================================
-                3D AI SCENE
-            ================================================= */}
-
-            <div
-              className="hero-visual"
-              aria-label="InsightIQ AI engine visualization"
-            >
-
-              <div className="scene-grid" />
-              <div className="energy-floor" />
-
-              <div className="orbit orbit-one" />
-              <div className="orbit orbit-two" />
-              <div className="orbit orbit-three" />
-
-              <div className="core-halo" />
-
-              <div className="ai-core">
-
-                <div className="core-shine" />
-
-                <Brain size={38} />
-
-                <strong>
-                  InsightIQ
-                </strong>
-
-                <span>
-                  AI Engine
-                </span>
-
-              </div>
-
-              <div className="scene-node node-rbi">
-
-                <Database size={18} />
-
-                <strong>
-                  RBI
-                </strong>
-
-                <small>
-                  Reference Rates
-                </small>
-
-              </div>
-
-              <div className="scene-node node-oil">
-
-                <Droplets size={18} />
-
-                <strong>
-                  WTI
-                </strong>
-
-                <small>
-                  Oil Signals
-                </small>
-
-              </div>
-
-              <div className="scene-node node-features">
-
-                <Layers3 size={18} />
-
-                <strong>
-                  FEATURES
-                </strong>
-
-                <small>
-                  20 engineered inputs
-                </small>
-
-              </div>
-
-              <div className="scene-node node-model">
-
-                <Brain size={18} />
-
-                <strong>
-                  RANDOM FOREST
-                </strong>
-
-                <small>
-                  Regression model
-                </small>
-
-              </div>
-
-              <div
-                className={`scene-outlook ${
-                  directionUp
-                    ? "up"
-                    : directionDown
-                    ? "down"
-                    : ""
-                }`}
+              <Panel
+                title="Currency comparison"
+                subtitle="All currencies rebased to 100 at the start of the selected range"
+                icon={Layers3}
               >
-
-                <span>
-                  MODEL OUTLOOK
-                </span>
-
-                <strong>
-                  {loading
-                    ? "..."
-                    : direction || "WAITING"}
-                </strong>
-
-              </div>
-
-            </div>
-
-          </section>
-
-          {/* =================================================
-              KPI CARDS
-          ================================================= */}
-
-          <section className="kpi-grid">
-
-            <TiltCard className="kpi-card blue">
-
-              <div className="kpi-icon">
-                <CircleDollarSign size={20} />
-              </div>
-
-              <span className="kpi-label">
-                CURRENT USD/INR
-              </span>
-
-              <strong>
-                {loading
-                  ? "--"
-                  : formatCurrency(current)}
-              </strong>
-
-              <small>
-                Latest RBI reference rate
-              </small>
-
-              <div className="kpi-scan" />
-
-            </TiltCard>
-
-            <TiltCard className="kpi-card purple">
-
-              <div className="kpi-icon">
-                <Brain size={20} />
-              </div>
-
-              <span className="kpi-label">
-                AI FORECAST
-              </span>
-
-              <strong>
-                {loading
-                  ? "--"
-                  : formatCurrency(forecast)}
-              </strong>
-
-              <small>
-                Predicted next-day rate
-              </small>
-
-              <div className="kpi-scan" />
-
-            </TiltCard>
-
-            <TiltCard className="kpi-card green">
-
-              <div className="kpi-icon">
-                <Activity size={20} />
-              </div>
-
-              <span className="kpi-label">
-                EXPECTED RETURN
-              </span>
-
-              <strong>
-                {loading
-                  ? "--"
-                  : formatPercent(
-                      predictedReturn
-                    )}
-              </strong>
-
-              <small>
-                Predicted next-day return
-              </small>
-
-              <div className="kpi-scan" />
-
-            </TiltCard>
-
-            <TiltCard
-              className={`kpi-card ${
-                directionDown
-                  ? "red"
-                  : "purple"
-              }`}
-            >
-
-              <div className="kpi-icon">
-
-                {directionDown ? (
-                  <TrendingDown size={20} />
-                ) : (
-                  <TrendingUp size={20} />
-                )}
-
-              </div>
-
-              <span className="kpi-label">
-                MODEL OUTLOOK
-              </span>
-
-              <strong>
-                {loading
-                  ? "--"
-                  : direction || "WAITING"}
-              </strong>
-
-              <small>
-                Random Forest direction
-              </small>
-
-              <div className="kpi-scan" />
-
-            </TiltCard>
-
-          </section>
-
-          {/* =================================================
-              MARKET + PREDICTION
-          ================================================= */}
-
-          <section
-            className="main-grid section-anchor"
-            data-section="market"
-          >
-
-            {/* =================================================
-                HISTORICAL CHART
-            ================================================= */}
-
-            <TiltCard className="panel chart-panel">
-
-              <div className="panel-header">
-
-                <div>
-
-                  <span className="section-kicker">
-                    MARKET MONITOR
-                  </span>
-
-                  <h3>
-                    USD/INR Price Movement
-                  </h3>
-
-                  <p>
-                    Historical RBI reference-rate
-                    observations.
-                  </p>
-
-                </div>
-
-                <div className="panel-icon">
-                  <LineChart size={19} />
-                </div>
-
-              </div>
-
-              <div className="chart-summary">
-
-                <div>
-
-                  <span>
-                    Latest observed
-                  </span>
-
-                  <strong>
-                    {formatCurrency(current)}
-                  </strong>
-
-                </div>
-
-                <div>
-
-                  <span>
-                    Model target
-                  </span>
-
-                  <strong className="green-text">
-                    {formatCurrency(forecast)}
-                  </strong>
-
-                </div>
-
-                <div>
-
-                  <span>
-                    Expected change
-                  </span>
-
-                  <strong
-                    className={
-                      Number(expectedChange) >= 0
-                        ? "green-text"
-                        : "red-text"
-                    }
-                  >
-                    {expectedChange == null ||
-                    !Number.isFinite(
-                      Number(expectedChange)
-                    )
-                      ? "--"
-                      : `${
-                          Number(
-                            expectedChange
-                          ) >= 0
-                            ? "+"
-                            : ""
-                        }₹${Number(
-                          expectedChange
-                        ).toFixed(4)}`}
-                  </strong>
-
-                </div>
-
-              </div>
-
-              <div
-                className="chart-container"
-                style={{
-                  width: "100%",
-                  height: "360px",
-                  minHeight: "360px",
-                  position: "relative",
-                }}
-              >
-
-                {historyLoading ? (
-
-                  <div className="chart-placeholder">
-
-                    <RefreshCw
-                      size={30}
-                      className="spin"
-                    />
-
-                    <strong>
-                      Loading historical data...
-                    </strong>
-
-                    <span>
-                      Connecting to FastAPI
-                      history endpoint.
-                    </span>
-
-                  </div>
-
-                ) : chartData.length > 0 ? (
-
-                  <ResponsiveContainer
-                    width="100%"
-                    height="100%"
-                  >
-
-                    <RechartsLineChart
-                      data={chartData}
-                      margin={{
-                        top: 15,
-                        right: 20,
-                        left: 5,
-                        bottom: 5,
-                      }}
-                    >
-
-                      <CartesianGrid
-                        stroke="rgba(74,126,185,.12)"
-                        strokeDasharray="3 5"
-                        vertical={false}
-                      />
-
-                      <XAxis
-                        dataKey="dateLabel"
-                        stroke="#566b88"
-                        tick={{
-                          fill: "#7890ad",
-                          fontSize: 10,
-                        }}
-                        tickLine={false}
-                        axisLine={false}
-                        minTickGap={25}
-                      />
-
-                      <YAxis
-                        domain={["auto", "auto"]}
-                        stroke="#566b88"
-                        tick={{
-                          fill: "#7890ad",
-                          fontSize: 10,
-                        }}
-                        tickLine={false}
-                        axisLine={false}
-                        width={55}
-                        tickFormatter={(value) =>
-                          `₹${Number(
-                            value
-                          ).toFixed(1)}`
-                        }
-                      />
-
-                      <Tooltip
-                        cursor={{
-                          stroke:
-                            "rgba(89,168,255,.35)",
-                          strokeWidth: 1,
-                          strokeDasharray:
-                            "4 4",
-                        }}
-                        contentStyle={{
-                          background:
-                            "#071325",
-                          border:
-                            "1px solid rgba(76,153,255,.35)",
-                          borderRadius: 12,
-                          color: "#edf5ff",
-                          boxShadow:
-                            "0 20px 60px rgba(0,0,0,.4)",
-                        }}
-                        labelStyle={{
-                          color: "#86a0c0",
-                          marginBottom: 5,
-                        }}
-                        formatter={(value) => [
-                          `₹${Number(
-                            value
-                          ).toFixed(4)}`,
-                          "USD/INR",
-                        ]}
-                      />
-
-                      <Line
-                        type="monotone"
-                        dataKey="usd_inr"
-                        name="USD/INR"
-                        stroke="#59a8ff"
-                        strokeWidth={3}
-                        dot={false}
-                        activeDot={{
-                          r: 6,
-                          fill: "#19f7a1",
-                          stroke:
-                            "#071325",
-                          strokeWidth: 3,
-                        }}
-                        isAnimationActive={false}
-                      />
-
-                    </RechartsLineChart>
-
-                  </ResponsiveContainer>
-
-                ) : (
-
-                  <div className="chart-placeholder">
-
-                    <Activity size={34} />
-
-                    <strong>
-                      No historical data received
-                    </strong>
-
-                    <span>
-                      Check the FastAPI
-                      <b> /api/history </b>
-                      response.
-                    </span>
-
-                    <small>
-                      Current API:
-                      {API_BASE_URL}/api/history
-                    </small>
-
-                  </div>
-
-                )}
-
-              </div>
-
-              {/* DATA STATUS */}
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent:
-                    "space-between",
-                  alignItems: "center",
-                  marginTop: "10px",
-                  padding:
-                    "8px 12px",
-                  borderRadius: "10px",
-                  background:
-                    "rgba(255,255,255,.025)",
-                  border:
-                    "1px solid rgba(255,255,255,.05)",
-                  fontSize: "11px",
-                  color: "#7188a4",
-                }}
-              >
-
-                <span>
-                  Historical observations
-                </span>
-
-                <strong
-                  style={{
-                    color:
-                      chartData.length > 0
-                        ? "#19f7a1"
-                        : "#ff6b81",
-                  }}
+                <ChartBox
+                  size="tall"
+                  loading={marketLoading && !compare}
+                  empty={!compareRows.length}
+                  emptyText="No comparison data. Check the /api/compare endpoint."
                 >
-                  {chartData.length} records
-                </strong>
+                  <CompareChart
+                    rows={compareRows}
+                    codes={compareCodes}
+                    currency={currency}
+                    pal={pal}
+                    tickFmt={tickFmt}
+                  />
+                </ChartBox>
+              </Panel>
+            </>
+          )}
 
+          {view === "analytics" && (
+            <>
+              <StatsGrid stats={stats} loading={statsLoading} />
+
+              <div className="grid-2">
+                <Panel
+                  title="Rolling volatility"
+                  subtitle="30-day standard deviation of daily % changes"
+                  icon={Activity}
+                >
+                  <ChartBox
+                    size="short"
+                    loading={marketLoading && !history.length}
+                    empty={!history.length}
+                    emptyText="No volatility data available."
+                  >
+                    <VolatilityChart rows={chartRows} pal={pal} tickFmt={tickFmt} />
+                  </ChartBox>
+                </Panel>
+
+                <Panel
+                  title="Monthly trend"
+                  subtitle="Change in monthly average rate (last 24 months)"
+                  icon={BarChart3}
+                >
+                  <ChartBox
+                    size="short"
+                    loading={marketLoading && !monthly.length}
+                    empty={!monthly.length}
+                    emptyText="No monthly data available."
+                  >
+                    <MonthlyChart rows={monthly} pal={pal} />
+                  </ChartBox>
+                </Panel>
               </div>
+            </>
+          )}
 
-            </TiltCard>
+          {view === "oil" && <OilView signals={signals} loading={coreLoading} pal={pal} />}
 
-            {/* =================================================
-                PREDICTION PANEL
-            ================================================= */}
-
-            <TiltCard
-              className="panel prediction-panel section-anchor"
-              data-section="prediction"
-            >
-
-              <div className="panel-header">
-
-                <div>
-
-                  <span className="section-kicker">
-                    MODEL OUTPUT
-                  </span>
-
-                  <h3>
-                    Next-day outlook
-                  </h3>
-
-                  <p>
-                    Generated from the latest
-                    feature vector.
-                  </p>
-
-                </div>
-
-                <div className="panel-icon purple-icon">
-                  <Brain size={19} />
-                </div>
-
-              </div>
-
-              <div className="forecast-value">
-
-                <span>
-                  Predicted USD/INR
-                </span>
-
-                <strong>
-                  {loading
-                    ? "--"
-                    : formatCurrency(forecast)}
-                </strong>
-
-              </div>
-
-              <div className="forecast-bridge">
-
-                <div>
-
-                  <span>
-                    Current
-                  </span>
-
-                  <strong>
-                    {formatCurrency(current)}
-                  </strong>
-
-                </div>
-
-                <ArrowUpRight size={21} />
-
-                <div>
-
-                  <span>
-                    Forecast
-                  </span>
-
-                  <strong className="green-text">
-                    {formatCurrency(forecast)}
-                  </strong>
-
-                </div>
-
-              </div>
-
-              <div
-                className={`outlook-box ${
-                  directionUp
-                    ? "up"
-                    : directionDown
-                    ? "down"
-                    : ""
-                }`}
-              >
-
-                {directionUp ? (
-                  <TrendingUp size={24} />
-                ) : directionDown ? (
-                  <TrendingDown size={24} />
-                ) : (
-                  <Activity size={24} />
-                )}
-
-                <div>
-
-                  <strong>
-                    {direction || "WAITING"}
-                  </strong>
-
-                  <span>
-                    Model expects the USD/INR
-                    rate to move{" "}
-                    {directionUp
-                      ? "higher"
-                      : directionDown
-                      ? "lower"
-                      : "sideways"}.
-                  </span>
-
-                </div>
-
-              </div>
-
-              <div className="forecast-mini-grid">
-
-                <div>
-
-                  <span>
-                    Expected movement
-                  </span>
-
-                  <strong>
-                    {expectedChange == null ||
-                    !Number.isFinite(
-                      Number(expectedChange)
-                    )
-                      ? "--"
-                      : `${
-                          Number(
-                            expectedChange
-                          ) >= 0
-                            ? "+"
-                            : ""
-                        }₹${Number(
-                          expectedChange
-                        ).toFixed(4)}`}
-                  </strong>
-
-                </div>
-
-                <div>
-
-                  <span>
-                    Return
-                  </span>
-
-                  <strong>
-                    {formatPercent(
-                      predictedReturn
-                    )}
-                  </strong>
-
-                </div>
-
-              </div>
-
-              <div className="model-engine-line">
-
-                <Zap size={13} />
-
-                Random Forest inference active
-
-              </div>
-
-            </TiltCard>
-
-          </section>
-
-          {/* =================================================
-              ANALYTICS
-          ================================================= */}
-
-          <section
-            className="analytics-grid section-anchor"
-            data-section="analytics"
-          >
-
-            <TiltCard className="panel analytics-panel">
-
-              <div className="panel-header">
-
-                <div>
-
-                  <span className="section-kicker">
-                    MODEL ANALYTICS
-                  </span>
-
-                  <h3>
-                    Prediction system
-                  </h3>
-
-                  <p>
-                    Current production
-                    configuration.
-                  </p>
-
-                </div>
-
-                <Gauge size={21} />
-
-              </div>
-
-              <div className="analytics-orb-row">
-
-                <div className="metric-orb cyan-orb">
-
-                  <div>
-
-                    <strong>
-                      20
-                    </strong>
-
-                    <span>
-                      FEATURES
-                    </span>
-
-                  </div>
-
-                </div>
-
-                <div className="metric-orb purple-orb">
-
-                  <div>
-
-                    <strong>
-                      RF
-                    </strong>
-
-                    <span>
-                      MODEL
-                    </span>
-
-                  </div>
-
-                </div>
-
-                <div className="metric-orb green-orb">
-
-                  <div>
-
-                    <strong>
-                      LIVE
-                    </strong>
-
-                    <span>
-                      PIPELINE
-                    </span>
-
-                  </div>
-
-                </div>
-
-              </div>
-
-              <div className="analytics-list">
-
-                <div>
-
-                  <span>
-                    Prediction target
-                  </span>
-
-                  <strong>
-                    Next-day USD/INR
-                  </strong>
-
-                </div>
-
-                <div>
-
-                  <span>
-                    Currency source
-                  </span>
-
-                  <strong>
-                    RBI reference rates
-                  </strong>
-
-                </div>
-
-                <div>
-
-                  <span>
-                    Market signal
-                  </span>
-
-                  <strong>
-                    WTI crude oil
-                  </strong>
-
-                </div>
-
-                <div>
-
-                  <span>
-                    Inference status
-                  </span>
-
-                  <strong className="green-text">
-                    Operational
-                  </strong>
-
-                </div>
-
-              </div>
-
-            </TiltCard>
-
-            {/* SIGNALS */}
-
-            <TiltCard className="panel signals-panel">
-
-              <div className="panel-header">
-
-                <div>
-
-                  <span className="section-kicker">
-                    MARKET INTELLIGENCE
-                  </span>
-
-                  <h3>
-                    Top model signals
-                  </h3>
-
-                  <p>
-                    Inputs currently visible
-                    to the prediction layer.
-                  </p>
-
-                </div>
-
-                <Waves size={21} />
-
-              </div>
-
-              <div className="signal-list">
-
-                <div className="signal-row">
-
-                  <span className="signal-icon blue">
-                    <TrendingUp size={16} />
-                  </span>
-
-                  <div>
-
-                    <strong>
-                      USD/INR momentum
-                    </strong>
-
-                    <small>
-                      Lagged exchange-rate
-                      behaviour
-                    </small>
-
-                  </div>
-
-                  <b>
-                    LIVE
-                  </b>
-
-                </div>
-
-                <div className="signal-row">
-
-                  <span className="signal-icon amber">
-                    <Droplets size={16} />
-                  </span>
-
-                  <div>
-
-                    <strong>
-                      Oil price momentum
-                    </strong>
-
-                    <small>
-                      WTI market signal
-                    </small>
-
-                  </div>
-
-                  <b>
-                    LIVE
-                  </b>
-
-                </div>
-
-                <div className="signal-row">
-
-                  <span className="signal-icon purple">
-                    <Activity size={16} />
-                  </span>
-
-                  <div>
-
-                    <strong>
-                      USD volatility
-                    </strong>
-
-                    <small>
-                      Short-term market risk
-                    </small>
-
-                  </div>
-
-                  <b>
-                    20D
-                  </b>
-
-                </div>
-
-                <div className="signal-row">
-
-                  <span className="signal-icon cyan">
-                    <ShieldCheck size={16} />
-                  </span>
-
-                  <div>
-
-                    <strong>
-                      Pipeline status
-                    </strong>
-
-                    <small>
-                      RBI + WTI +
-                      feature engineering
-                    </small>
-
-                  </div>
-
-                  <b className="green-text">
-                    ONLINE
-                  </b>
-
-                </div>
-
-              </div>
-
-            </TiltCard>
-
-          </section>
-
-          {/* =================================================
-              PIPELINE
-          ================================================= */}
-
-          <section
-            className="pipeline-panel panel section-anchor"
-            data-section="pipeline"
-          >
-
-            <div className="panel-header">
-
-              <div>
-
-                <span className="section-kicker">
-                  END-TO-END INTELLIGENCE FLOW
-                </span>
-
-                <h3>
-                  InsightIQ AI Data Pipeline
-                </h3>
-
-                <p>
-                  From raw market observations
-                  to the next-day forecast.
-                </p>
-
-              </div>
-
-              <Cpu size={21} />
-
-            </div>
-
-            <div className="pipeline-flow">
-
-              <div className="pipeline-node blue-node">
-
-                <div className="node-cube">
-                  <Database size={27} />
-                </div>
-
-                <b>01</b>
-
-                <strong>
-                  RBI Data
-                </strong>
-
-                <small>
-                  Exchange rates
-                </small>
-
-              </div>
-
-              <div className="flow-arrow">
-                →
-              </div>
-
-              <div className="pipeline-node amber-node">
-
-                <div className="node-cube">
-                  <Droplets size={27} />
-                </div>
-
-                <b>02</b>
-
-                <strong>
-                  Oil Signals
-                </strong>
-
-                <small>
-                  WTI crude prices
-                </small>
-
-              </div>
-
-              <div className="flow-arrow">
-                →
-              </div>
-
-              <div className="pipeline-node cyan-node">
-
-                <div className="node-cube">
-                  <Layers3 size={27} />
-                </div>
-
-                <b>03</b>
-
-                <strong>
-                  Feature Engineering
-                </strong>
-
-                <small>
-                  20 engineered features
-                </small>
-
-              </div>
-
-              <div className="flow-arrow">
-                →
-              </div>
-
-              <div className="pipeline-node purple-node">
-
-                <div className="node-cube">
-                  <Brain size={27} />
-                </div>
-
-                <b>04</b>
-
-                <strong>
-                  Random Forest
-                </strong>
-
-                <small>
-                  Model inference
-                </small>
-
-              </div>
-
-              <div className="flow-arrow">
-                →
-              </div>
-
-              <div className="pipeline-node green-node">
-
-                <div className="node-cube">
-                  <TrendingUp size={27} />
-                </div>
-
-                <b>05</b>
-
-                <strong>
-                  AI Forecast
-                </strong>
-
-                <small>
-                  Next-day USD/INR
-                </small>
-
-              </div>
-
-            </div>
-
-          </section>
-
-          {/* =================================================
-              MODEL INSIGHTS
-          ================================================= */}
-
-          <section
-            className="insights-grid section-anchor"
-            data-section="insights"
-          >
-
-            <TiltCard className="panel insight-panel">
-
-              <div className="panel-header">
-
-                <div>
-
-                  <span className="section-kicker">
-                    MODEL INSIGHTS
-                  </span>
-
-                  <h3>
-                    How the forecast is produced
-                  </h3>
-
-                  <p>
-                    A compact explanation of
-                    the deployed inference path.
-                  </p>
-
-                </div>
-
-                <Sparkles size={21} />
-
-              </div>
-
-              <div className="insight-list">
-
-                <div className="insight-item">
-
-                  <span>
-                    01
-                  </span>
-
-                  <div>
-
-                    <strong>
-                      RBI exchange-rate data
-                    </strong>
-
-                    <p>
-                      Historical USD/INR observations
-                      are transformed into lag,
-                      moving-average and volatility
-                      features.
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="insight-item">
-
-                  <span>
-                    02
-                  </span>
-
-                  <div>
-
-                    <strong>
-                      Crude-oil intelligence
-                    </strong>
-
-                    <p>
-                      WTI price, return,
-                      moving-average and volatility
-                      signals provide additional
-                      market context.
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="insight-item">
-
-                  <span>
-                    03
-                  </span>
-
-                  <div>
-
-                    <strong>
-                      20 engineered inputs
-                    </strong>
-
-                    <p>
-                      The latest market state is
-                      converted into the same feature
-                      structure used during inference.
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="insight-item">
-
-                  <span>
-                    04
-                  </span>
-
-                  <div>
-
-                    <strong>
-                      Random Forest prediction
-                    </strong>
-
-                    <p>
-                      The trained regression model
-                      estimates the next-day return
-                      and converts it into the
-                      forecast USD/INR rate.
-                    </p>
-
-                  </div>
-
-                </div>
-
-              </div>
-
-            </TiltCard>
-
-            {/* SYSTEM VISUAL */}
-
-            <TiltCard className="panel system-panel">
-
-              <div className="system-visual">
-
-                <div className="system-ring ring-a" />
-                <div className="system-ring ring-b" />
-                <div className="system-ring ring-c" />
-
-                <div className="system-core">
-
-                  <Brain size={34} />
-
-                  <span>
-                    AI
-                  </span>
-
-                </div>
-
-                <div className="system-dot dot-a" />
-                <div className="system-dot dot-b" />
-                <div className="system-dot dot-c" />
-
-              </div>
-
-              <div className="system-copy">
-
-                <span className="section-kicker">
-                  SYSTEM STATUS
-                </span>
-
-                <h3>
-                  Inference engine online
-                </h3>
-
-                <p>
-                  The dashboard is connected
-                  to the FastAPI service and can
-                  request the latest prediction
-                  and historical series.
-                </p>
-
-                <div className="status-pill">
-
-                  <span />
-
-                  Production-ready interface
-
-                </div>
-
-              </div>
-
-            </TiltCard>
-
-          </section>
-
-          {/* =================================================
-              FOOTER
-          ================================================= */}
+          {view === "model" && (
+            <ModelView features={features} prediction={prediction} loading={coreLoading} />
+          )}
 
           <footer className="footer">
-
             <span>
-              InsightIQ AI
+              <ShieldCheck size={13} /> InsightIQ AI · experimental analytics, not financial advice
             </span>
-
-            <span>
-              AI-powered currency intelligence
-            </span>
-
-            <span className="footer-online">
-
-              <i />
-
-              Backend connected
-
-            </span>
-
+            <span>Data: RBI reference rates + WTI crude oil</span>
           </footer>
-
         </main>
-
       </div>
-
     </div>
   );
 }
-
-export default App;
